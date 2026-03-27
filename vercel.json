@@ -5,11 +5,5 @@
       "source": "/api/:path*",
       "destination": "/api/server.js"
     }
-  ],
-  "env": {
-    "GOOGLE_PLACES_API_KEY": "@google-places-api-key",
-    "SERP_API_KEY": "@serp-api-key",
-    "OPENAI_API_KEY": "@openai-api-key",
-    "PERPLEXITY_API_KEY": "@perplexity-api-key"
-  }
+  ]
 }
