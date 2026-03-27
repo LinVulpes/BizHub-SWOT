@@ -1,0 +1,19 @@
+{
+  "name": "swot-generator",
+  "version": "1.0.0",
+  "description": "SWOT & AI Description Generator for Business Listings",
+  "main": "api/server.js",
+  "scripts": {
+    "start": "node api/server.js",
+    "dev": "node api/server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1"
+  },
+  "engines": {
+    "node": ">=18.x"
+  }
+}

@@ -1,0 +1,1519 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SWOT & AI Description Generator</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState } = React;
+
+        // Backend API URL - Works both locally and on Vercel
+        const API_BASE_URL = window.location.hostname === 'localhost' 
+            ? 'http://localhost:3001/api' 
+            : '/api';
+
+        // ============================================================================
+        // SYSTEM PROMPTS
+        // ============================================================================
+
+        const SWOT_SYSTEM_PROMPT = `You are an expert Business Market Analyst and M&A consultant specializing in small and mid-sized businesses in Singapore and Southeast Asia.
+Your job is to produce clear, concise, and actionable SWOT analyses that help buyers make informed acquisition decisions while presenting businesses professionally.
+
+CORE APPROACH:
+- Analyze internal characteristics: financials, operations, assets, team, customer base, licenses, digital presence
+- Contextualize against typical peers in the same industry and location (Singapore/SEA)
+- Use market comparisons throughout to benchmark performance, size, margins, and positioning
+- Infer business model, customer base, and revenue drivers from available data
+- Be information-dense: every sentence must contain specific, actionable insights
+
+USING ENRICHED DATA FROM GOOGLE PLACES & SERP:
+If the business profile includes googlePlaces.competitiveAnalysis:
+- STRENGTHS: Compare rating to area average ("Rated 4.9/5 vs area average of 4.2 within 1km radius")
+- STRENGTHS: Highlight if review count is above average ("120 reviews vs area average of 45")
+- WEAKNESSES: Note if rating is below competitors ("3.8/5 rating below area average of 4.3")
+- WEAKNESSES: Flag low review count ("Only 15 reviews vs competitor average of 180")
+- THREATS: Cite competitive density ("18 similar businesses within 1km creates intense local competition")
+- Use topCompetitors data to name specific nearby competitors
+
+If the business profile includes googlePlaces.reviewAnalysis:
+- STRENGTHS: Reference positive feedback themes if positivePercentage is high
+- WEAKNESSES: Note concerns from negative reviews if present
+- Use actual review samples (positiveSample/negativeSample) to extract specific praise or complaints
+
+If the business profile includes serpData.competitorDiscovery:
+- WEAKNESSES: Note search visibility ("Does not appear in top 10 results for 'best [industry] [location]'")
+- THREATS: List top-ranked competitors from topRankedCompetitors array
+- STRENGTHS: If businessAppearsInTop10 is true, highlight strong SEO presence
+
+If the business profile includes serpData.industryTrends:
+- OPPORTUNITIES: Reference specific trend insights from trendInsights array
+- THREATS: Note industry challenges mentioned in trend articles
+- Use relatedSearches to identify emerging customer interests
+
+MARKET BENCHMARKING (CRITICAL):
+For each business, assess and compare:
+- How many similar businesses operate in Singapore in this industry (competitive density)
+- Typical size, revenue range, and margins for this business type in Singapore
+- How this business performs vs typical peers: "above-average margins," "below typical revenue," "similar to neighborhood outlets"
+- Direct competitors (same niche, size) vs indirect competitors (platforms, chains, DIY, freelancers)
+- For online/remote businesses: consider regional/global trends and demand, not just Singapore
+
+FINANCIAL ASSESSMENT:
+- Analyze revenue/netProfit trends: stable, growing, or declining - state facts with numbers
+- Use "netProfit" field which represents Seller's Discretionary Earnings (SDE) - owner's true take-home
+- Compare margins and cost structure to industry norms
+- Flag missing data as buyer due diligence items
+- Note financial history limitations (e.g., only 2 years vs 5+ year standard)
+
+BUSINESS STORY USAGE:
+If businessStory.text is provided:
+- Extract key details about origin, what makes the business unique, operational strengths
+- Reference specific customer insights, owner passion points, or competitive advantages mentioned
+- Use concrete details from the story to enrich Business Snapshot and Strengths sections
+
+BUSINESS NAME PRIVACY:
+If hideBusinessName is true:
+- Refer to the business as "the business" or "the company" throughout the entire analysis
+- NEVER use the actual business name from the businessName field
+- Use generic terms like "this established business," "the operation," "the enterprise"
+If hideBusinessName is false:
+- You may use the business name sparingly where natural and appropriate
+
+SOCIAL MEDIA METRICS:
+If socialMediaMetrics are provided (Instagram, Facebook, LinkedIn followers):
+- STRENGTHS: Highlight strong social following as brand strength ("3,400 Instagram followers demonstrates brand awareness")
+- Compare to typical businesses in the segment if follower count is notably high
+- Use engagement rate if provided to assess audience quality
+- WEAKNESSES: Note if social presence is weak or abandoned for competitors with active channels
+
+EDGE CASE HANDLING - CRITICAL:
+
+NEW BUSINESSES (<2 years operating):
+- DO NOT penalize for "limited financial history" - this is expected for new businesses
+- FOCUS on: Growth rate, market validation, early traction, founder expertise, customer acquisition efficiency
+- COMPARE to typical Year 1-2 businesses in the industry, NOT to established 5+ year competitors
+- In Weaknesses, frame constructively: "Early-stage business requires sustained growth to prove long-term viability" NOT "Insufficient track record"
+- In Opportunities, emphasize growth potential and market entry timing
+
+DECLINING REVENUE (YoY revenue down):
+- INVESTIGATE context from businessStory.text before concluding business is failing
+- POSSIBLE EXPLANATIONS: Seasonal variation, project-based revenue timing, strategic pivot/scaling down, owner reducing hours intentionally
+- In Weaknesses, state facts objectively: "Revenue decreased from $X to $Y (Z% decline)" then add context if available
+- In Due Diligence, include: "Clarify reason for revenue decline - seasonal, strategic, or market-related"
+- DO NOT assume business is in distress without evidence
+
+NO DIGITAL PRESENCE (no website, social media, or Google reviews):
+- CHECK industry type FIRST before flagging as weakness
+- For wholesale, import/export, manufacturing, industrial B2B services: Lack of digital presence is NORMAL and acceptable
+- For retail, F&B, consumer services, professional services: Note as competitive disadvantage
+- In Weaknesses, be specific: "Limited online visibility may hinder customer acquisition in increasingly digital market" (for consumer businesses)
+- DO NOT penalize industrial/B2B businesses for lacking consumer-facing digital presence
+
+MINIMAL ENRICHMENT DATA (Google Places or SERP returns little/nothing):
+- If Google Places finds no data: Business is likely home-based, virtual, B2B service, or wholesale/industrial
+- If SERP competitors are too generic: Industry may be very niche, hyper-local, or non-consumer-facing
+- DO NOT inflate weaknesses when enrichment fails due to business model
+- FOCUS analysis on provided financial and operational data instead of missing external validation
+- In Business Snapshot, acknowledge: "Home-based / B2B operation with minimal public digital footprint"
+
+INCONSISTENT/IRREGULAR FINANCIALS (revenue varies significantly year to year):
+- COMMON in: Project-based businesses (construction, consulting), seasonal businesses (tourism, tax prep), freelance services
+- DO NOT treat as weakness if variation is explained by business model
+- In Weaknesses, frame as: "Project-based revenue creates cash flow variability" NOT "Unstable revenue"
+- In Due Diligence, request: "Review pipeline/backlog for upcoming projects or seasonal forecast"
+
+WEAKNESSES - HONEST BUT PROFESSIONAL:
+Present real business limitations across three dimensions:
+1. MARKET POSITION: Compare to competitors and industry standards
+   - "Revenue below typical range for established businesses in this segment"
+   - "Limited market share in highly competitive district"
+   - "Minimal digital presence while competitors actively market online"
+   
+2. FINANCIAL REALITIES: Use specific numbers from data
+   - "Revenue declined 15% over 2 years (from $X to $Y)"
+   - "Net margin of X% below typical Y-Z% for this sector"
+   - "Only 2 years of financial history vs 5+ year industry standard"
+   
+3. OPERATIONAL FACTORS: Day-to-day business challenges
+   - "Highly owner-dependent with no documented management systems"
+   - "Small team (X people) creates key person risk"
+   - "Only X months remaining on lease term"
+
+Frame weaknesses factually and professionally - sellers should acknowledge them as legitimate, buyers should use them to assess risk.
+
+DIGITAL PRESENCE HANDLING:
+- If competitors have digital presence and this business doesn't: note as competitive disadvantage in Weaknesses
+- If traditional business where digital isn't standard: don't penalize, but mention as growth opportunity in Opportunities
+- Look for alternative strengths: years operating, stable revenue, location, licenses, repeat customers
+
+WRITING RULES - MAXIMUM EFFICIENCY:
+- STRICT: Each bullet point = MAXIMUM 2 sentences
+- First sentence: State the key fact/insight with specific numbers or comparisons
+- Second sentence: Add critical context, implication, or market comparison
+- Be information-dense: pack maximum insight into minimum words
+- Use market comparisons in Strengths and Weaknesses sections
+- NO filler words, NO generic statements, NO redundancy
+
+TONE:
+- Concise, professional, fact-driven
+- Balanced: honest about weaknesses, objective about strengths
+- Assume reader is a serious buyer making acquisition decisions
+- Use plain English, avoid jargon unless industry-specific
+- Make reasonable assumptions when data missing, label clearly: "Assumption: ..."
+
+FORBIDDEN:
+- Never fabricate specific listings, URLs, or transaction prices
+- Never mention JSON, APIs, tools, or technical processes
+- Never exceed 2 sentences per numbered point
+- Never use judgmental language: avoid "poorly managed," "failing," "suspicious"
+- Never ask questions; state what buyer should verify in Due Diligence
+
+REQUIRED STRUCTURE:
+Follow exact markdown format in user prompt with these sections:
+1. Business Snapshot: 3-7 bullets, factual overview
+2. Strengths: 4-8 numbered points (max 2 sentences each), with market comparisons where relevant
+3. Weaknesses: 4-7 numbered points (max 2 sentences each), covering market position, financials, and operations
+4. Opportunities: 4-8 numbered points (max 2 sentences each), specific growth angles
+5. Threats: 4-6 numbered points (max 2 sentences each), external risks
+6. Due Diligence: 5-10 bullets (1 sentence each), concrete verification checks`;
+
+
+        const DESCRIPTION_SYSTEM_PROMPT = `You are a professional business listing writer specializing in business-for-sale descriptions for acquisition platforms.
+
+Your job is to create compelling, factual business descriptions using a HYBRID format: bullet points for facts, short paragraphs for context.
+
+APPROACH:
+- Use ONLY information provided in the business profile
+- Be specific with numbers (revenue, profit, years operating, team size, social media followers)
+- Highlight competitive advantages and what makes the business unique
+- Include operational details, customer insights, and financial performance
+- Professional but accessible language - no jargon or exaggeration
+- Keep paragraphs SHORT: 2-3 sentences maximum
+
+USING ENRICHED DATA:
+If googlePlaces data is available:
+- Mention rating and review count
+- Reference competitive positioning vs area average
+- Use social media metrics (Instagram/Facebook followers)
+
+If serpData is available:
+- Note search visibility if strong
+- Reference industry trends if relevant
+
+If businessStory.text is provided:
+- Extract key details about origin, operations, and what makes the business special
+- Use specific details from the story in relevant sections
+
+BUSINESS NAME HANDLING:
+If hideBusinessName is true: Use "[Business Name Confidential]" or generic terms like "the business," "the company," "this established business"
+If hideBusinessName is false: Use the actual business name
+
+EDGE CASE HANDLING:
+
+NEW BUSINESSES (<2 years):
+- Emphasize growth trajectory and early traction rather than long track record
+- Frame as: "Launched in [year], achieving [growth metric] in first [X] months"
+- Highlight founder expertise, market validation, early customer adoption
+- DO NOT apologize for being new - position as emerging opportunity
+
+DECLINING REVENUE:
+- Present facts objectively without assuming failure
+- Frame as: "Revenue of $X in [recent year], compared to $Y in [prior year]"
+- If context available from businessStory: Include it ("Revenue adjusted due to strategic pivot to higher-margin services")
+- If no context: Present as neutral fact, let buyer investigate
+
+NO DIGITAL PRESENCE:
+- For B2B/industrial businesses: Emphasize relationship-based sales, industry networks
+- DO NOT force social media mentions if none exist
+- Focus on other strengths: location, relationships, operational efficiency, specialized expertise
+
+MINIMAL DATA:
+- Work with what's provided - don't pad with generic assumptions
+- If a section has limited data, keep it brief but factual
+- Focus on strongest available data points (usually financials or location/industry)
+
+REQUIRED STRUCTURE (IN THIS EXACT ORDER):
+
+**Key Highlights**
+• [3-5 bullet points highlighting: establishment date, industry focus, revenue/growth, unique metrics (social media, customer count), location/property status]
+• Each bullet should pack maximum information with specific numbers
+
+**What Makes This Business Unique**
+[Paragraph format: 2-3 sentences explaining competitive advantages, market positioning, and key differentiators that set this business apart from competitors. Focus on barriers to entry, proprietary advantages, or unique market position.]
+
+**Operations**
+• [2-4 bullet points covering: business model/revenue streams, daily operations and processes, marketing/customer acquisition channels, owner involvement level]
+• Focus on how the business actually runs day-to-day
+
+**Customers & Market**
+• [2-4 bullet points covering: customer profile and demographics, acquisition channels and retention rates, geographic market and reach, loyalty metrics or repeat business rates]
+• Include specific numbers where available (retention %, customer count, geographic split)
+
+**Financial Performance**
+• [2-4 bullet points covering: revenue trends over time, profit margins and net profit, cost structure breakdown, cash flow and financial health indicators]
+• Always include specific numbers - this is critical for buyers
+
+FORMATTING RULES:
+- Use bullet points (•) for Key Highlights, Operations, Customers, and Financials sections
+- Use paragraph format (2-3 sentences max) ONLY for "What Makes This Business Unique"
+- Each bullet should be 1-2 sentences
+- Be information-dense - every word should add value
+- Use bold for section headers: **Section Name**
+- If information is missing for a section, write what's available or use reasonable industry assumptions
+
+TONE & STYLE:
+- Professional business tone (like your sample: "has established itself," "demonstrates," "leverages")
+- Specific numbers over generalizations ("$350K revenue" not "strong revenue")
+- Factual, not marketing hype
+- Focus on what buyers care about: financials, operations, growth potential, risks
+- Frame the business as an investment opportunity
+
+REQUIRED DISCLAIMER AT END:
+After all sections, add a blank line then include:
+
+---
+
+**⚠️ Data Disclosure**
+• All financial and operational data is self-reported by the seller
+• Independent verification recommended before purchase
+• Buyers should conduct thorough due diligence and request supporting documentation
+• Contact seller directly for detailed financials, contracts, and verification materials
+
+OUTPUT:
+Generate the structured description in the exact order specified above, ending with the disclaimer.`;
+
+        // ============================================================================
+        // BUILDER USER PROMPT
+        // ============================================================================
+
+        function buildUserPrompt(profileJson, country = "Singapore") {
+            return `Generate a SWOT analysis and buyer report for the following business-for-sale.
+
+Use the structured data below, and make reasonable assumptions where information is missing (clearly label assumptions).
+
+Business profile (JSON):
+${profileJson}
+
+Context and constraints:
+- The business is located in ${country}. If the country is Singapore or not specified, assume Singapore regulatory and market context.
+- Financial numbers are annual and in local currency.
+- "netProfit" represents Seller's Discretionary Earnings (SDE) - the owner's true take-home after all business expenses but excluding owner salary.
+- Use Google Places data, SERP data, and social media metrics as signals of brand strength, reputation, and digital reach if available.
+- Extract insights from businessStory.text if provided - use specific details about origin, operations, and customer appeal.
+- Compare this business to typical peers in ${country} in the same industry - benchmark size, margins, digital presence, and positioning.
+
+CRITICAL OUTPUT RULES:
+- MAXIMUM 2 SENTENCES PER POINT (strictly enforced)
+- Each point must have a BOLD TITLE followed by colon, then explanation
+- Format: **Bold Title:** First sentence with key fact. Second sentence with context.
+- First sentence: Key fact with specific numbers or market comparison
+- Second sentence: Critical context, implication, or additional detail
+- Be information-dense and concise - no filler, every word must add value
+
+Output format:
+
+1) Start with a 1–2 sentence overall assessment in plain text (no heading).
+
+2) Then use these exact markdown section headings and order:
+
+**1. Business Snapshot (for Buyer Context)**
+- 3–7 bullet points summarizing: nature of business, products/services, target customers, location, age, team size, brand/reputation
+- Keep factual and concise
+
+---
+
+**2. Strengths**
+Each point must follow this format with bold title:
+**Title (3-6 words):** First sentence with data/numbers. Second sentence with market comparison or context.
+
+Example format:
+**Strong revenue growth trajectory:** Revenue grew 11% year-over-year from $180K to $200K in 2024. This growth rate exceeds the typical 5-8% for established agencies in this segment.
+
+**Above-average profit margins:** Net margin of 60% ($120K earnings on $200K revenue) significantly exceeds 30-40% typical for digital agencies. Strong profitability indicates efficient operations and pricing power.
+
+Guidelines:
+- 4–8 numbered points total (MAXIMUM 2 sentences each)
+- Focus on internal advantages: revenue growth, margins, customer base, assets, location, licenses, digital presence
+- Include market comparisons where relevant
+- Connect to data from profile with specific numbers
+
+---
+
+**3. Weaknesses**
+Each point must follow this format with bold title:
+**Title (3-6 words):** First sentence with data/numbers. Second sentence with market comparison or implication.
+
+Example format:
+**Below-market revenue scale:** Revenue of $200K is below the $300-500K typical for established digital agencies in Singapore. Small scale limits competitive positioning and supplier bargaining power.
+
+**Limited financial track record:** Only 2 years of financial history provided; industry standard for acquisition due diligence is 5+ years. Limited track record increases buyer risk and valuation uncertainty.
+
+Guidelines:
+- 4–7 numbered points total (MAXIMUM 2 sentences each)
+- Cover three dimensions:
+  * Market position: Compare to competitors and industry standards
+  * Financial: Use specific numbers - declining revenue, thin margins, limited history, missing data
+  * Operational: Owner dependence, team size, systems, lease terms, equipment
+- Be factual and professional - state realities without judgment
+- Use market comparisons
+
+---
+
+**4. Opportunities**
+Each point must follow this format with bold title:
+**Title (3-6 words):** First sentence describing the opportunity. Second sentence explaining potential impact or approach.
+
+Example format:
+**Digital marketing expansion:** Implement SEO, Google Ads, and social media presence to reduce reliance on referrals. Digital channels could add 20-30% revenue based on typical agency acquisition costs.
+
+**Service line diversification:** Add complementary services like UX design, digital marketing, or hosting to increase revenue per client. Cross-selling could improve margins and customer lifetime value.
+
+Guidelines:
+- 4–8 numbered points total (MAXIMUM 2 sentences each)
+- Focus on growth angles: new segments, geographic expansion, digitalization, additional services
+- Be specific and actionable
+- Reference market trends and connect to addressing weaknesses
+
+---
+
+**5. Threats**
+Each point must follow this format with bold title:
+**Title (3-6 words):** First sentence describing the threat. Second sentence explaining likelihood or impact.
+
+Example format:
+**Intensifying competitive pressure:** Increasing number of freelance developers and low-cost offshore agencies in Singapore market. Price competition could erode margins if business cannot differentiate on value.
+
+**Platform consolidation risk:** Major platforms (Shopify, Wix, Webflow) reducing need for custom development. Shift toward no-code/low-code solutions may reduce addressable market over 3-5 years.
+
+Guidelines:
+- 4–6 numbered points total (MAXIMUM 2 sentences each)
+- External risks: competition intensity, regulatory changes, platform dependence, market demand shifts, lease/landlord risk
+- Be realistic but measured - not alarmist
+
+---
+
+**6. Buyer Due Diligence Checklist (Practical Next Steps)**
+- 5–10 bullet points (1 sentence each)
+- Specific checks: financial verification, customer/supplier analysis, lease review, staff assessment, licenses, debt/obligations, transition plan
+
+---
+
+**⚠️ Data Disclosure**
+• Analysis based on self-reported data provided by seller
+• Independent verification of all claims recommended
+• Buyers should conduct comprehensive due diligence including financial audit, customer interviews, and legal review
+• Contact seller for supporting documentation (tax returns, contracts, licenses, etc.)
+
+---
+
+Formatting rules:
+- Use only the markdown headings and structure above
+- CRITICAL: Every numbered point in Strengths, Weaknesses, Opportunities, and Threats MUST have a bold title followed by colon
+- Format: **Bold Title:** Sentence one. Sentence two.
+- STRICT: No more than 2 sentences per numbered point
+- Do not add extra sections or conclusions
+- Do not include code blocks
+- Refer to the business as "the business" or "the company"
+- Never mention JSON, APIs, or technical tools`;
+        }
+
+        function buildDescriptionPrompt(profileJson) {
+            return `Create a professional business description for this business-for-sale listing:
+
+${profileJson}
+
+Write 2-3 paragraphs following the structure in the system prompt.`;
+        }
+
+        // ============================================================================
+        // API INTEGRATION FUNCTIONS
+        // ============================================================================
+
+        // OpenAI - SWOT (calls backend)
+        async function generateSWOTWithOpenAI(profile, apiKey) {
+            const profileJson = JSON.stringify(profile, null, 2);
+            const userPrompt = buildUserPrompt(profileJson, profile.country);
+
+            const response = await fetch(`${API_BASE_URL}/generate-swot`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    businessProfile: profile,
+                    provider: "openai",
+                    systemPrompt: SWOT_SYSTEM_PROMPT,
+                    userPrompt: userPrompt
+                })
+            });
+
+            const data = await response.json();
+            if (data.swotAnalysis) {
+                return data.swotAnalysis;
+            }
+            throw new Error(data.error || "Unexpected response from server");
+        }
+
+        // Perplexity - SWOT (calls backend)
+        async function generateSWOTWithPerplexity(profile, apiKey) {
+            const profileJson = JSON.stringify(profile, null, 2);
+            const userPrompt = buildUserPrompt(profileJson, profile.country);
+
+            const response = await fetch(`${API_BASE_URL}/generate-swot`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    businessProfile: profile,
+                    provider: "perplexity",
+                    systemPrompt: SWOT_SYSTEM_PROMPT,
+                    userPrompt: userPrompt
+                })
+            });
+
+            const data = await response.json();
+            if (data.swotAnalysis) {
+                return data.swotAnalysis;
+            }
+            throw new Error(data.error || "Unexpected response from server");
+        }
+
+        // OpenAI - Description (calls backend)
+        async function generateDescriptionWithOpenAI(profile, apiKey) {
+            const response = await fetch(`${API_BASE_URL}/generate-description`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    businessProfile: profile,
+                    provider: "openai"
+                })
+            });
+
+            const data = await response.json();
+            if (data.description) {
+                return data.description;
+            }
+            throw new Error(data.error || "Unexpected response from server");
+        }
+
+        // Perplexity - Description (calls backend)
+        async function generateDescriptionWithPerplexity(profile, apiKey) {
+            const response = await fetch(`${API_BASE_URL}/generate-description`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    businessProfile: profile,
+                    provider: "perplexity"
+                })
+            });
+
+            const data = await response.json();
+            if (data.description) {
+                return data.description;
+            }
+            throw new Error(data.error || "Unexpected response from server");
+        }
+
+        // Backend enrichment
+        async function enrichWithBackend(profile) {
+            const response = await fetch(`${API_BASE_URL}/enrich`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    businessName: profile.businessName,
+                    location: profile.areaOrDistrict || profile.country,
+                    industry: profile.industryType,
+                    socialLinks: profile.socialLinks // Pass social links for scraping
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Backend enrichment failed: ${response.statusText}`);
+            }
+
+            const enrichedData = await response.json();
+
+            if (enrichedData.googlePlaces && !enrichedData.googlePlaces.error) {
+                profile.googlePlaces = enrichedData.googlePlaces;
+            }
+            if (enrichedData.serpData && !enrichedData.serpData.error) {
+                profile.serpData = enrichedData.serpData;
+            }
+            if (enrichedData.socialMediaMetrics) {
+                profile.socialMediaMetrics = enrichedData.socialMediaMetrics;
+            }
+            profile.enrichmentTimestamp = enrichedData.timestamp;
+
+            return profile;
+        }
+
+        // ============================================================================
+        // SAMPLE DATA (UPDATED WITH netProfit)
+        // ============================================================================
+
+        const SAMPLES = {
+            "Digital Agency": {
+                "businessName": "Orfeostory Digital Agency",
+                "industryType": "Professional Services - Digital Marketing",
+                "businessStructure": "LLC/Corporation",
+                "operatingModel": "Hybrid",
+                "postalCode": "416171",
+                "areaOrDistrict": "Kaki Bukit",
+                "nearestMrt": "Kaki Bukit MRT",
+                "country": "Singapore",
+                "yearFounded": 2014,
+                "teamSize": "6-10",
+                "website": "https://www.orfeostory.com",
+                "socialLinks": {
+                    "linkedin": "https://www.linkedin.com/company/orfeostory",
+                    "instagram": "https://www.instagram.com/orfeostory"
+                },
+                "reasonForSelling": "Looking to expand in other areas",
+                "businessDescription": "IT-enabled services focusing on website design, web development, mobile apps, and managed IT services for SMEs and institutions.",
+                "businessStory": {
+                    "text": "Started in 2014 when founder saw gap in quality web development for education sector in Singapore. We specialize in custom web applications, mobile apps, and managed IT services for SMEs and educational institutions. Target clients are mid-sized organizations needing ongoing technical support, not just one-off projects. Our team of 8 includes 5 developers, 2 designers, and 1 project manager. Revenue has grown steadily from $180K to $200K with 70% repeat business. We operate from Kaki Bukit office but most client work is done remotely. What attracts clients is our education sector expertise and long-term partnership approach - average client retention is 4+ years."
+                },
+                "financials": [
+                    { "year": 2023, "revenue": 180000, "netProfit": 100000 },
+                    { "year": 2024, "revenue": 200000, "netProfit": 120000 }
+                ],
+                "revenueModel": "Mixed",
+                "costBreakdown": {
+                    "monthlyOperatingCost": 11500,
+                    "operatingCostDescription": "Rent $3,500, Salaries (8 staff) $6,500, Software licenses $800, Insurance $400, Utilities $300",
+                    "monthlyVariableExpenses": 1500,
+                    "variableCostDescription": "Freelancer costs for overflow work, cloud hosting for client projects"
+                },
+                "debt": 0,
+                "tangibleAssets": [
+                    { "label": "Computer Equipment (5 workstations)", "value": 15000 },
+                    { "label": "Office Furniture", "value": 5000 }
+                ],
+                "intangibleAssets": [
+                    { "label": "Client relationships and contracts", "value": null },
+                    { "label": "Proprietary frameworks and code", "value": 10000 }
+                ],
+                "propertyInfo": {
+                    "status": "rented",
+                    "rented": {
+                        "monthlyRental": 3500,
+                        "leaseTermRemainingMonths": 18,
+                        "description": "Small office space, landlord flexible on renewal"
+                    }
+                },
+                "licenses": [
+                    {
+                        "name": "ACRA Business Registration",
+                        "issuingAuthority": "ACRA",
+                        "description": "Standard business registration, transfer requires ownership change filing with ACRA ($50 fee, 1-2 days processing)",
+                        "hasDocument": true
+                    }
+                ],
+                "supportProvided": {
+                    "trainingSupport": true,
+                    "staffTransitionSupport": true,
+                    "vendorSupplierSupport": false,
+                    "clientCustomerSupport": true,
+                    "otherSupportNotes": "2 weeks knowledge transfer with client introductions"
+                }
+            },
+            "Cafe (Tanjong Pagar)": {
+                "businessName": "The Daily Grind Coffee House",
+                "industryType": "F&B - Cafe",
+                "businessStructure": "Sole Proprietorship",
+                "operatingModel": "Physical Location",
+                "postalCode": "088532",
+                "areaOrDistrict": "Tanjong Pagar",
+                "nearestMrt": "Tanjong Pagar MRT",
+                "country": "Singapore",
+                "yearFounded": 2019,
+                "teamSize": "3-5",
+                "website": "https://www.dailygrindcafe.sg",
+                "socialLinks": {
+                    "instagram": "https://www.instagram.com/dailygrindcafe/",
+                    "facebook": "https://www.facebook.com/dailygrindcafe/"
+                },
+                "reasonForSelling": "Owner relocating overseas for family reasons",
+                "businessDescription": "Specialty coffee cafe serving artisan coffee, brunch items, and fresh pastries.",
+                "businessStory": {
+                    "text": "Started The Daily Grind in 2019 when I noticed Tanjong Pagar had no quality third-wave coffee options despite high concentration of office workers. As a former barista trainer, I saw opportunity to bring specialty coffee education to the neighborhood.\n\nWe serve specialty single-origin coffee, all-day brunch, and fresh pastries. Our target customers are office professionals during weekdays (60%) and neighborhood residents on weekends (40%). What makes us different is our focus on coffee education - we offer free monthly cupping sessions.\n\nWe open 7am-6pm weekdays, 8am-4pm weekends with a team of 4 (myself, 2 full-time baristas, 1 part-time server). Daily operations are streamlined with documented recipes and training protocols. We source beans weekly from our roaster partner.\n\nI love the regular customers who stop by every morning - we know their orders by heart. What attracts customers is the consistency of quality and the personal touch. Many come specifically for our seasonal single-origin offerings that change monthly."
+                },
+                "financials": [
+                    { "year": 2022, "revenue": 280000, "netProfit": 65000 },
+                    { "year": 2023, "revenue": 320000, "netProfit": 78000 },
+                    { "year": 2024, "revenue": 350000, "netProfit": 85000 }
+                ],
+                "monthlyFinancials": [
+                    { "month": "2024-01", "revenue": 25000, "netProfit": 5500 },
+                    { "month": "2024-02", "revenue": 26000, "netProfit": 6000 },
+                    { "month": "2024-03", "revenue": 28000, "netProfit": 6800 },
+                    { "month": "2024-04", "revenue": 27000, "netProfit": 6200 },
+                    { "month": "2024-05", "revenue": 29000, "netProfit": 7100 },
+                    { "month": "2024-06", "revenue": 30000, "netProfit": 7500 },
+                    { "month": "2024-07", "revenue": 31000, "netProfit": 7800 },
+                    { "month": "2024-08", "revenue": 30000, "netProfit": 7400 },
+                    { "month": "2024-09", "revenue": 29000, "netProfit": 7000 },
+                    { "month": "2024-10", "revenue": 30000, "netProfit": 7300 },
+                    { "month": "2024-11", "revenue": 32000, "netProfit": 8200 },
+                    { "month": "2024-12", "revenue": 33000, "netProfit": 8700 }
+                ],
+                "revenueModel": "Direct Sales",
+                "costBreakdown": {
+                    "monthlyOperatingCost": 18000,
+                    "operatingCostDescription": "Rent $7,500, Salaries (3 staff) $8,000, Utilities $800, Insurance $400, Equipment maintenance $600, Marketing $700",
+                    "monthlyVariableExpenses": 8500,
+                    "variableCostDescription": "Coffee beans & supplies $5,000, Pastries $2,000, Packaging $1,000, Cleaning $500"
+                },
+                "debt": 15000,
+                "debtDescription": "Equipment loan for espresso machine, 18 months remaining at $850/month",
+                "tangibleAssets": [
+                    { "label": "La Marzocco espresso machine (2022)", "value": 25000 },
+                    { "label": "Mahlkonig grinders (2x)", "value": 6000 },
+                    { "label": "Furniture and fixtures", "value": 12000 },
+                    { "label": "Kitchen equipment", "value": 8000 }
+                ],
+                "intangibleAssets": [
+                    { "label": "Brand and customer loyalty (3,400 Instagram followers)", "value": null },
+                    { "label": "Supplier relationships (exclusive beans deal)", "value": null },
+                    { "label": "Recipes and training materials", "value": 2000 }
+                ],
+                "propertyInfo": {
+                    "status": "rented",
+                    "rented": {
+                        "monthlyRental": 7500,
+                        "leaseTermRemainingMonths": 24,
+                        "description": "Ground floor shophouse with outdoor seating. Landlord cooperative, open to lease renewal with new tenant."
+                    }
+                },
+                "licenses": [
+                    {
+                        "name": "Food Shop License",
+                        "issuingAuthority": "Singapore Food Agency",
+                        "expiryDate": "2026-12-31",
+                        "description": "Annual renewal required with health inspection (always passed with A grade). Cost $300/year. Transfer process: New owner submits application with business transfer documents to SFA, typically approved within 2-3 weeks.",
+                        "hasDocument": true
+                    },
+                    {
+                        "name": "ACRA Business Registration",
+                        "issuingAuthority": "ACRA",
+                        "description": "Transfer requires filing business ownership change with ACRA ($50 fee, 1-2 days processing)",
+                        "hasDocument": true
+                    }
+                ],
+                "supportProvided": {
+                    "trainingSupport": true,
+                    "staffTransitionSupport": true,
+                    "vendorSupplierSupport": true,
+                    "clientCustomerSupport": false,
+                    "otherSupportNotes": "2 weeks full-time handover training + 3 months phone consultation"
+                }
+            },
+            "Tuition Center": {
+                "businessName": "Math Masters Learning Centre",
+                "industryType": "Education - Tuition",
+                "businessStructure": "Sole Proprietorship",
+                "operatingModel": "Physical Location",
+                "postalCode": "560123",
+                "areaOrDistrict": "Bukit Merah",
+                "nearestMrt": "Queenstown MRT",
+                "country": "Singapore",
+                "yearFounded": 2018,
+                "teamSize": "6-10",
+                "socialLinks": {
+                    "facebook": "https://www.facebook.com/mathmasters"
+                },
+                "reasonForSelling": "Owner pursuing overseas opportunities",
+                "businessDescription": "Established tuition center specializing in secondary school mathematics.",
+                "businessStory": {
+                    "text": "Founded in 2018 by experienced MOE teacher with 12 years teaching experience. Saw need for quality, affordable math tuition focused on building strong fundamentals rather than just exam techniques.\n\nWe specialize in O-Level and A-Level mathematics, serving secondary school students. Class sizes capped at 8 students for personalized attention. What makes us different is our systematic curriculum and proven track record - 92% of students improved by at least one grade.\n\nWe operate from 2pm-9pm weekdays and 9am-6pm weekends with 180 active students across 25 weekly classes. 4 full-time teachers plus myself, all MOE-trained. Strong word-of-mouth referrals from parents.\n\nI love seeing students' confidence grow when math finally 'clicks' for them. What attracts parents is our consistent results and caring teachers who know each student personally. Many families have multiple children studying with us over the years."
+                },
+                "financials": [
+                    { "year": 2022, "revenue": 420000, "netProfit": 185000 },
+                    { "year": 2023, "revenue": 450000, "netProfit": 205000 },
+                    { "year": 2024, "revenue": 480000, "netProfit": 220000 }
+                ],
+                "revenueModel": "Subscription/Recurring",
+                "costBreakdown": {
+                    "monthlyOperatingCost": 20000,
+                    "operatingCostDescription": "Rent $8,500, Teacher salaries (4 teachers) $10,000, Utilities $600, Insurance $400, Materials $500",
+                    "monthlyVariableExpenses": 1500,
+                    "variableCostDescription": "Exam papers, worksheets, admin supplies"
+                },
+                "debt": 0,
+                "tangibleAssets": [
+                    { "label": "Classroom furniture and whiteboards", "value": 12000 },
+                    { "label": "Audio-visual equipment", "value": 8000 },
+                    { "label": "Air conditioning units (4x)", "value": 6000 }
+                ],
+                "intangibleAssets": [
+                    { "label": "Curriculum and teaching materials", "value": 15000 },
+                    { "label": "Student base (180 active enrollments)", "value": null },
+                    { "label": "Reputation and parent network", "value": null }
+                ],
+                "propertyInfo": {
+                    "status": "rented",
+                    "rented": {
+                        "monthlyRental": 8500,
+                        "leaseTermRemainingMonths": 30,
+                        "description": "3rd floor unit with 4 classrooms, landlord willing to renew lease"
+                    }
+                },
+                "licenses": [
+                    {
+                        "name": "Private Education Institution License",
+                        "issuingAuthority": "SkillsFuture Singapore",
+                        "expiryDate": "2027-06-30",
+                        "description": "Required for operating tuition center. Renewable every 4 years. Transfer requires new owner to meet SSG requirements (qualified teachers, proper facilities). Process takes 2-3 months with SSG approval.",
+                        "hasDocument": true
+                    },
+                    {
+                        "name": "ACRA Business Registration",
+                        "issuingAuthority": "ACRA",
+                        "description": "Standard business registration transfer process",
+                        "hasDocument": true
+                    }
+                ],
+                "supportProvided": {
+                    "trainingSupport": true,
+                    "staffTransitionSupport": true,
+                    "vendorSupplierSupport": false,
+                    "clientCustomerSupport": true,
+                    "otherSupportNotes": "3 months handover including parent introductions and curriculum training"
+                }
+            },
+            "E-commerce Store": {
+                "businessName": "TechGadgets Online",
+                "industryType": "E-commerce - Electronics",
+                "businessStructure": "LLC/Corporation",
+                "operatingModel": "Remote/Online",
+                "country": "Singapore",
+                "yearFounded": 2020,
+                "teamSize": "1-5",
+                "website": "https://www.techgadgets.sg",
+                "socialLinks": {
+                    "instagram": "https://www.instagram.com/techgadgets_sg",
+                    "facebook": "https://www.facebook.com/techgadgetssg"
+                },
+                "reasonForSelling": "Founder starting new venture in different industry",
+                "businessDescription": "Online retailer of consumer electronics and tech accessories with automated fulfillment.",
+                "businessStory": {
+                    "text": "Launched TechGadgets in 2020 during pandemic when I saw opportunity in online electronics retail. Started as Shopify store selling phone accessories, grew into full consumer electronics range.\n\nWe sell tech accessories, smart home devices, and consumer electronics. Target customers are tech-savvy Singaporeans aged 25-45 who prefer online shopping. What makes us different is our curated selection and fast local delivery - most orders ship same day from our 3PL warehouse.\n\nBusiness runs on automated fulfillment model. I handle marketing and supplier relationships remotely, 3PL partner manages inventory and shipping. One part-time VA handles customer service. Revenue automated through Shopify with email marketing driving 40% of sales.\n\nI love the scalability - business grew 25% year-over-year with minimal time input (15 hours/week). What attracts customers is our product selection, competitive pricing, and 2-day delivery guarantee. 85% revenue from repeat customers, strong email list of 12,000 subscribers."
+                },
+                "financials": [
+                    { "year": 2022, "revenue": 620000, "netProfit": 155000 },
+                    { "year": 2023, "revenue": 780000, "netProfit": 195000 },
+                    { "year": 2024, "revenue": 850000, "netProfit": 220000 }
+                ],
+                "revenueModel": "Direct Sales",
+                "costBreakdown": {
+                    "monthlyOperatingCost": 8500,
+                    "operatingCostDescription": "3PL warehouse & fulfillment $4,000, Shopify & tools $800, Marketing (Google/Facebook Ads) $2,500, VA salary $700, Accounting $500",
+                    "monthlyVariableExpenses": 42500,
+                    "variableCostDescription": "COGS approximately 60% of revenue (varies by product mix), payment processing 2.5%, shipping to customers"
+                },
+                "debt": 0,
+                "tangibleAssets": [
+                    { "label": "Inventory (electronics & accessories at 3PL)", "value": 85000 },
+                    { "label": "Computer equipment", "value": 4000 }
+                ],
+                "intangibleAssets": [
+                    { "label": "Domain and Shopify store (fully configured)", "value": 5000 },
+                    { "label": "Email subscriber list (12,000 active)", "value": null },
+                    { "label": "Social media following (24K total)", "value": null },
+                    { "label": "SEO rankings (45+ first-page keywords)", "value": null }
+                ],
+                "propertyInfo": { "status": "not_applicable" },
+                "licenses": [
+                    {
+                        "name": "ACRA Business Registration",
+                        "issuingAuthority": "ACRA",
+                        "description": "Standard business registration transfer",
+                        "hasDocument": true
+                    }
+                ],
+                "supportProvided": {
+                    "trainingSupport": true,
+                    "staffTransitionSupport": false,
+                    "vendorSupplierSupport": true,
+                    "clientCustomerSupport": false,
+                    "otherSupportNotes": "Full handover: supplier contacts, 3PL introduction, Shopify admin training, marketing playbook, 1 month consultation"
+                }
+            },
+            "Hardware Store (No Digital Presence)": {
+                "businessName": "Ah Seng Hardware & Tools",
+                "industryType": "Retail - Hardware",
+                "businessStructure": "Sole Proprietorship",
+                "operatingModel": "Physical Location",
+                "postalCode": "560456",
+                "areaOrDistrict": "Ang Mo Kio",
+                "nearestMrt": "Ang Mo Kio MRT",
+                "country": "Singapore",
+                "yearFounded": 2005,
+                "teamSize": "3-5",
+                "reasonForSelling": "Owner retiring at 68",
+                "businessDescription": "Traditional neighborhood hardware store serving contractors and homeowners for 19 years.",
+                "businessStory": {
+                    "text": "Started Ah Seng Hardware in 2005 when I retired from construction industry and saw opportunity to serve HDB contractors in Ang Mo Kio. Brought 30 years construction experience and supplier connections into retail.\n\nWe supply tools, building materials, electrical and plumbing supplies to contractors and DIY homeowners. Main customers are renovation contractors (60%), handymen (25%), and homeowners (15%). What makes us different is personal service - we know our regular customers' projects and stock hard-to-find items they need.\n\nWe operate 9am-6pm daily except Sundays. Just 3 of us: myself, my wife handling accounts, and one helper for deliveries and heavy items. We do same-day delivery within 5km using our van for bulk orders.\n\nI enjoy the relationships built over 19 years - contractors trust our advice and competitive bulk pricing. What keeps customers coming back is our product knowledge and ability to source specialty items within a day. No website or social media - purely walk-in trade and phone orders from long-term clients."
+                },
+                "financials": [
+                    { "year": 2022, "revenue": 390000, "netProfit": 95000 },
+                    { "year": 2023, "revenue": 410000, "netProfit": 105000 },
+                    { "year": 2024, "revenue": 425000, "netProfit": 110000 }
+                ],
+                "revenueModel": "Direct Sales",
+                "costBreakdown": {
+                    "monthlyOperatingCost": 11500,
+                    "operatingCostDescription": "Rent $5,500, Helper salary $2,000, Utilities $600, Van expenses (fuel, maintenance, insurance) $1,200, Insurance $400, Maintenance $800, Admin $1,000",
+                    "monthlyVariableExpenses": 18000,
+                    "variableCostDescription": "Inventory purchases from suppliers - varies by demand, typically 60% of monthly revenue"
+                },
+                "debt": 0,
+                "tangibleAssets": [
+                    { "label": "Inventory (tools, materials, electrical, plumbing supplies)", "value": 65000 },
+                    { "label": "Shelving and fixtures", "value": 8000 },
+                    { "label": "Delivery van (2018 Toyota)", "value": 15000 },
+                    { "label": "Cash register and basic POS", "value": 1500 }
+                ],
+                "intangibleAssets": [
+                    { "label": "Customer relationships (3 major contractor accounts, 50+ regular customers)", "value": null },
+                    { "label": "Supplier credit terms and relationships (8 major suppliers)", "value": null }
+                ],
+                "propertyInfo": {
+                    "status": "rented",
+                    "rented": {
+                        "monthlyRental": 5500,
+                        "leaseTermRemainingMonths": 36,
+                        "description": "Ground floor corner unit with loading bay access and storage area. Landlord has owned building for 20+ years, very stable relationship."
+                    }
+                },
+                "licenses": [
+                    {
+                        "name": "ACRA Business Registration",
+                        "issuingAuthority": "ACRA",
+                        "description": "Standard business registration. Transfer is straightforward with ownership change filing.",
+                        "hasDocument": true
+                    }
+                ],
+                "supportProvided": {
+                    "trainingSupport": true,
+                    "staffTransitionSupport": true,
+                    "vendorSupplierSupport": true,
+                    "clientCustomerSupport": true,
+                    "otherSupportNotes": "Owner willing to provide 4 weeks full-time training covering inventory management, supplier relationships, pricing strategies, and introduce to all key contractor clients personally"
+                }
+            },
+            "Translation Service (Home-Based)": {
+                "businessName": "Elite Translation Services",
+                "industryType": "Professional Services - Translation & Interpretation",
+                "businessStructure": "Sole Proprietorship",
+                "operatingModel": "Virtual/Remote",
+                "areaOrDistrict": "Ang Mo Kio",
+                "country": "Singapore",
+                "yearFounded": 2019,
+                "teamSize": "1-2",
+                "socialLinks": {},
+                "reasonForSelling": "Owner relocating overseas for family reasons",
+                "businessDescription": "Specialized legal and technical translation services from Japanese to English for law firms, corporations, and government agencies.",
+                "businessStory": {
+                    "text": "Started in 2019 after 15 years working as in-house translator for Japanese law firm in Singapore. I focus exclusively on legal document translation (contracts, court filings, patents) for corporate clients and law firms. All clients come from professional network and referrals - no marketing needed. Work is project-based, so revenue varies depending on large contract timing. For example, 2024 revenue appears lower but that's because two major contracts shifted to early 2025. I work from home office with one part-time assistant for administrative tasks. What makes this valuable is my legal specialization and reputation - clients specifically request me for high-stakes translations where accuracy is critical."
+                },
+                "financials": [
+                    { "year": 2022, "revenue": 85000, "netProfit": 72000 },
+                    { "year": 2023, "revenue": 123000, "netProfit": 98000 },
+                    { "year": 2024, "revenue": 67000, "netProfit": 55000 }
+                ],
+                "revenueModel": "Project/Contract",
+                "costBreakdown": {
+                    "monthlyOperatingCost": 800,
+                    "operatingCostDescription": "Software subscriptions $300, Professional insurance $400, Home office expenses $100",
+                    "monthlyVariableExpenses": 200,
+                    "variableCostDescription": "Freelance proofreaders for large projects"
+                },
+                "debt": 0,
+                "tangibleAssets": [
+                    { "label": "Computer equipment and reference library", "value": 3000 }
+                ],
+                "intangibleAssets": [
+                    { "label": "Client relationships (8 recurring corporate clients)", "value": null },
+                    { "label": "Specialized legal terminology databases", "value": 5000 }
+                ],
+                "propertyInfo": {
+                    "status": "virtual"
+                },
+                "licenses": [
+                    {
+                        "name": "Professional Translation Certification (Japanese)",
+                        "issuingAuthority": "Japan Translation Federation",
+                        "hasDocument": true
+                    }
+                ],
+                "supportProvided": {
+                    "trainingSupport": true,
+                    "staffTransitionSupport": false,
+                    "vendorSupplierSupport": false,
+                    "clientCustomerSupport": true,
+                    "otherSupportNotes": "Will introduce buyer to all existing clients and provide 2 months transition support. Buyer must have Japanese fluency and legal translation background."
+                }
+            },
+            "Import Trading (New Business)": {
+                "businessName": "Pacific Goods Trading",
+                "industryType": "Wholesale - Import/Export",
+                "businessStructure": "LLC/Corporation",
+                "operatingModel": "Virtual/Remote",
+                "areaOrDistrict": "Jurong",
+                "country": "Singapore",
+                "yearFounded": 2023,
+                "teamSize": "1-2",
+                "website": "None",
+                "socialLinks": {
+                    "whatsapp": "+65 9123 4567"
+                },
+                "reasonForSelling": "Partner wants to exit, sole owner not interested in running alone",
+                "businessDescription": "Import trading company sourcing consumer electronics and home goods from China suppliers for Singapore retailers and e-commerce sellers.",
+                "businessStory": {
+                    "text": "Launched in January 2023 when my business partner and I saw opportunity in direct China sourcing for local retailers. We import consumer electronics, smart home devices, and kitchenware from verified Alibaba suppliers and sell to local retailers and online sellers. Revenue grew quickly from $45K/month in Q1 to $85K/month by Q4 2024. Business runs entirely on WhatsApp and email - we don't need a website because all sales are B2B through existing relationships. I handle supplier relationships and logistics, partner handles sales and customer service. Our advantage is fast delivery (we keep buffer inventory) and local after-sales support. Currently have 12 regular retail clients who order monthly. Partner wants to exit to focus on his main business, and I don't want to run this alone."
+                },
+                "financials": [
+                    { "year": 2023, "revenue": 380000, "netProfit": 72000 },
+                    { "year": 2024, "revenue": 920000, "netProfit": 165000 }
+                ],
+                "revenueModel": "Direct Sales",
+                "costBreakdown": {
+                    "monthlyOperatingCost": 12000,
+                    "operatingCostDescription": "Warehouse rental $4,500, Logistics/freight $6,000, Insurance $800, Banking fees $700",
+                    "monthlyVariableExpenses": 52000,
+                    "variableCostDescription": "Cost of goods from suppliers (varies by orders)"
+                },
+                "debt": 15000,
+                "debtDescription": "Working capital loan from bank, 24 months remaining",
+                "tangibleAssets": [
+                    { "label": "Inventory (current stock)", "value": 85000 },
+                    { "label": "Warehouse equipment (shelving, pallet jacks)", "value": 8000 }
+                ],
+                "intangibleAssets": [
+                    { "label": "Supplier relationships (5 verified China suppliers)", "value": null },
+                    { "label": "Customer base (12 regular retail buyers)", "value": null }
+                ],
+                "propertyInfo": {
+                    "status": "rented",
+                    "rented": {
+                        "monthlyRental": 4500,
+                        "leaseTermRemainingMonths": 14,
+                        "description": "Industrial warehouse unit, landlord open to lease renewal"
+                    }
+                },
+                "licenses": [
+                    {
+                        "name": "ACRA Business Registration",
+                        "issuingAuthority": "ACRA",
+                        "hasDocument": true
+                    }
+                ],
+                "supportProvided": {
+                    "trainingSupport": true,
+                    "staffTransitionSupport": false,
+                    "vendorSupplierSupport": true,
+                    "clientCustomerSupport": true,
+                    "otherSupportNotes": "Both partners will provide 1 month full-time transition including supplier introductions, customer handover, and operational training"
+                }
+            },
+            "Seasonal Business (Tax Preparation)": {
+                "businessName": "TaxPro Services Singapore",
+                "industryType": "Professional Services - Tax Preparation",
+                "businessStructure": "Sole Proprietorship",
+                "operatingModel": "Hybrid",
+                "areaOrDistrict": "Toa Payoh",
+                "nearestMrt": "Toa Payoh MRT",
+                "country": "Singapore",
+                "yearFounded": 2018,
+                "teamSize": "3-5",
+                "website": "https://www.taxproservices.sg",
+                "socialLinks": {
+                    "facebook": "https://www.facebook.com/taxpros",
+                    "linkedin": "https://www.linkedin.com/company/taxproservices"
+                },
+                "reasonForSelling": "Owner retiring at age 65",
+                "businessDescription": "Tax preparation and filing services for individuals and small businesses, specializing in personal tax returns and basic corporate tax.",
+                "businessStory": {
+                    "text": "Started TaxPro in 2018 after retiring from Big 4 accounting firm. I provide tax filing services for individuals and SMEs during peak season (January-April) and business advisory rest of year. Revenue is highly seasonal - 75% comes in Q1-Q2 during tax season. During peak months I hire 2-3 temp staff to handle volume. Off-peak I do bookkeeping and advisory work for 15 retainer clients. Most clients are repeats - average client has been with me 4+ years. Business runs from small office but most consultations now done via Zoom since COVID. I'm 65 and ready to retire, looking for another tax professional to take over my client base."
+                },
+                "financials": [
+                    { "year": 2022, "revenue": 185000, "netProfit": 125000 },
+                    { "year": 2023, "revenue": 195000, "netProfit": 132000 },
+                    { "year": 2024, "revenue": 178000, "netProfit": 118000 }
+                ],
+                "monthlyFinancials": [
+                    { "month": "2024-01", "revenue": 38000, "netProfit": 26000 },
+                    { "month": "2024-02", "revenue": 42000, "netProfit": 29000 },
+                    { "month": "2024-03", "revenue": 35000, "netProfit": 24000 },
+                    { "month": "2024-04", "revenue": 28000, "netProfit": 19000 },
+                    { "month": "2024-05", "revenue": 8000, "netProfit": 4500 },
+                    { "month": "2024-06", "revenue": 6000, "netProfit": 3000 },
+                    { "month": "2024-07", "revenue": 5000, "netProfit": 2500 },
+                    { "month": "2024-08", "revenue": 4000, "netProfit": 1500 },
+                    { "month": "2024-09", "revenue": 3000, "netProfit": 1000 },
+                    { "month": "2024-10", "revenue": 2500, "netProfit": 800 },
+                    { "month": "2024-11", "revenue": 3000, "netProfit": 1200 },
+                    { "month": "2024-12", "revenue": 3500, "netProfit": 1500 }
+                ],
+                "revenueModel": "Mixed",
+                "costBreakdown": {
+                    "monthlyOperatingCost": 4200,
+                    "operatingCostDescription": "Office rent $2,000, Software licenses $800, Insurance $400, Part-time admin $1,000",
+                    "monthlyVariableExpenses": 1500,
+                    "variableCostDescription": "Temp staff during tax season (Jan-Apr), marketing materials"
+                },
+                "debt": 0,
+                "tangibleAssets": [
+                    { "label": "Office furniture and equipment", "value": 5000 },
+                    { "label": "Tax software licenses (transferable)", "value": 3000 }
+                ],
+                "intangibleAssets": [
+                    { "label": "Client base (280 individual clients, 35 business clients)", "value": null },
+                    { "label": "Reputation and referral network", "value": null }
+                ],
+                "propertyInfo": {
+                    "status": "rented",
+                    "rented": {
+                        "monthlyRental": 2000,
+                        "leaseTermRemainingMonths": 8,
+                        "description": "Small office space, could transition to home-based or virtual operation"
+                    }
+                },
+                "licenses": [
+                    {
+                        "name": "ACRA Business Registration",
+                        "issuingAuthority": "ACRA",
+                        "hasDocument": true
+                    },
+                    {
+                        "name": "Tax Agent License",
+                        "issuingAuthority": "IRAS (Inland Revenue Authority of Singapore)",
+                        "expiryDate": "2026-12-31",
+                        "description": "Buyer must be qualified tax agent to maintain license. Transfer process requires IRAS approval.",
+                        "hasDocument": true
+                    }
+                ],
+                "supportProvided": {
+                    "trainingSupport": true,
+                    "staffTransitionSupport": true,
+                    "vendorSupplierSupport": false,
+                    "clientCustomerSupport": true,
+                    "otherSupportNotes": "Will work through entire 2025 tax season (Jan-Apr) with buyer to ensure smooth client transition. Buyer must have tax preparation credentials."
+                }
+            },
+            "Consulting (Declining Revenue)": {
+                "businessName": "Strategic HR Consultancy",
+                "industryType": "Professional Services - HR Consulting",
+                "businessStructure": "Sole Proprietorship",
+                "operatingModel": "Virtual/Remote",
+                "areaOrDistrict": "Bishan",
+                "country": "Singapore",
+                "yearFounded": 2017,
+                "teamSize": "1-2",
+                "website": "https://www.strategichrs.com",
+                "socialLinks": {
+                    "linkedin": "https://www.linkedin.com/in/strategichr"
+                },
+                "reasonForSelling": "Owner intentionally scaling down to semi-retirement, prefer selling client base to new consultant",
+                "businessDescription": "HR consulting for SMEs covering recruitment, performance management, employment law compliance, and HR policy development.",
+                "businessStory": {
+                    "text": "Started in 2017 providing HR consulting to Singapore SMEs. I specialize in employment law compliance, HR policy setup, and recruitment for companies 20-100 employees. Revenue peaked in 2022 at $165K when I was working 50+ hours/week with 12 active clients. In 2023 I deliberately reduced workload to 30 hours/week and let 4 high-maintenance clients go, dropping revenue to $128K. In 2024 I reduced further to 20 hours/week focusing on 5 retainer clients I enjoy working with, revenue $92K. This is intentional semi-retirement, not business decline. The 5 remaining clients are all long-term (3+ years), low-maintenance, and highly profitable. I'm 58 and want to fully retire, so selling the client relationships and goodwill to another HR consultant."
+                },
+                "financials": [
+                    { "year": 2022, "revenue": 165000, "netProfit": 142000 },
+                    { "year": 2023, "revenue": 128000, "netProfit": 112000 },
+                    { "year": 2024, "revenue": 92000, "netProfit": 83000 }
+                ],
+                "revenueModel": "Subscription/Recurring",
+                "costBreakdown": {
+                    "monthlyOperatingCost": 650,
+                    "operatingCostDescription": "Software subscriptions $400, Professional insurance $150, Website hosting $100",
+                    "monthlyVariableExpenses": 100,
+                    "variableCostDescription": "Marketing materials, professional development"
+                },
+                "debt": 0,
+                "tangibleAssets": [
+                    { "label": "Computer equipment and office setup", "value": 2000 }
+                ],
+                "intangibleAssets": [
+                    { "label": "5 retainer client relationships (averaging $18K/year each)", "value": null },
+                    { "label": "HR policy templates and frameworks", "value": 8000 },
+                    { "label": "Employment law reference materials", "value": 2000 }
+                ],
+                "propertyInfo": {
+                    "status": "virtual"
+                },
+                "licenses": [
+                    {
+                        "name": "ACRA Business Registration",
+                        "issuingAuthority": "ACRA",
+                        "hasDocument": true
+                    }
+                ],
+                "supportProvided": {
+                    "trainingSupport": true,
+                    "staffTransitionSupport": false,
+                    "vendorSupplierSupport": false,
+                    "clientCustomerSupport": true,
+                    "otherSupportNotes": "Will introduce buyer to all 5 clients personally and provide 3 months shadowing/transition support. Buyer should have HR professional credentials (IHRP or equivalent). Clients are stable and low-churn - buyer can grow revenue by adding back hours or acquiring new clients using existing reputation."
+                }
+            },
+            "Niche Manufacturing (B2B)": {
+                "businessName": "Precision Mold Engineering",
+                "industryType": "Manufacturing - Industrial Components",
+                "businessStructure": "LLC/Corporation",
+                "operatingModel": "Physical Location",
+                "areaOrDistrict": "Woodlands",
+                "nearestMrt": "Woodlands MRT",
+                "country": "Singapore",
+                "yearFounded": 2015,
+                "teamSize": "6-10",
+                "socialLinks": {},
+                "reasonForSelling": "Founder health issues, need to exit business",
+                "businessDescription": "Precision injection mold design and manufacturing for electronics and medical device OEMs in Singapore and Malaysia.",
+                "businessStory": {
+                    "text": "Founded in 2015 specializing in high-precision injection molds for electronics and medical device manufacturers. We serve 8 OEM clients who need custom tooling for plastic components. Business is 100% B2B - no consumer touchpoint, no website needed. All clients come from industry relationships and trade shows. Revenue is project-based: we design and manufacture molds (average project $45K, takes 6-8 weeks), then clients order replacement parts. We have 7 skilled technicians running CNC machines and EDM equipment. Average client relationship is 5+ years with repeat orders. Unfortunately I have serious health issues and need to exit business quickly. Equipment is all owned (no lease), facility lease has 30 months remaining. Buyer needs technical knowledge in mold-making or precision engineering."
+                },
+                "financials": [
+                    { "year": 2022, "revenue": 890000, "netProfit": 245000 },
+                    { "year": 2023, "revenue": 1050000, "netProfit": 298000 },
+                    { "year": 2024, "revenue": 975000, "netProfit": 267000 }
+                ],
+                "revenueModel": "Project/Contract",
+                "costBreakdown": {
+                    "monthlyOperatingCost": 48000,
+                    "operatingCostDescription": "Rent $12,000, Salaries (7 technicians + 1 admin) $32,000, Utilities $2,500, Insurance $1,500",
+                    "monthlyVariableExpenses": 28000,
+                    "variableCostDescription": "Raw materials (steel, aluminum), consumables, machine maintenance"
+                },
+                "debt": 0,
+                "tangibleAssets": [
+                    { "label": "CNC machines (4 units)", "value": 320000 },
+                    { "label": "EDM equipment (2 units)", "value": 180000 },
+                    { "label": "Inspection and measuring equipment", "value": 45000 },
+                    { "label": "Tooling and fixtures", "value": 25000 }
+                ],
+                "intangibleAssets": [
+                    { "label": "Client relationships (8 active OEMs)", "value": null },
+                    { "label": "Technical expertise and process know-how", "value": null }
+                ],
+                "propertyInfo": {
+                    "status": "rented",
+                    "rented": {
+                        "monthlyRental": 12000,
+                        "leaseTermRemainingMonths": 30,
+                        "description": "Industrial factory unit with overhead crane, good condition, landlord stable"
+                    }
+                },
+                "licenses": [
+                    {
+                        "name": "Factory License",
+                        "issuingAuthority": "Ministry of Manpower (MOM)",
+                        "expiryDate": "2026-06-30",
+                        "description": "Annual renewal required with workplace safety inspection. Transfer process requires MOM notification.",
+                        "hasDocument": true
+                    },
+                    {
+                        "name": "ACRA Business Registration",
+                        "issuingAuthority": "ACRA",
+                        "hasDocument": true
+                    }
+                ],
+                "supportProvided": {
+                    "trainingSupport": true,
+                    "staffTransitionSupport": true,
+                    "vendorSupplierSupport": true,
+                    "clientCustomerSupport": true,
+                    "otherSupportNotes": "Due to health, transition period will be 2-3 months maximum. Senior technician can stay on to assist. Will introduce to all clients and suppliers. Buyer should have manufacturing or engineering background."
+                }
+            }
+        };
+
+        // ============================================================================
+        // MAIN APP COMPONENT
+        // ============================================================================
+
+        function App() {
+            // Business Profile State
+            const [profileText, setProfileText] = useState(JSON.stringify(SAMPLES["Digital Agency"], null, 2));
+            const [selectedSample, setSelectedSample] = useState("Digital Agency");
+            const [enriching, setEnriching] = useState(false);
+            const [enrichStatus, setEnrichStatus] = useState("");
+            const [hideBusinessName, setHideBusinessName] = useState(false);
+
+            // SWOT State
+            const [swotProvider, setSwotProvider] = useState("openai");
+            const [swotOutput, setSwotOutput] = useState("");
+            const [swotGenerating, setSwotGenerating] = useState(false);
+
+            // Description State
+            const [descProvider, setDescProvider] = useState("openai");
+            const [descOutput, setDescOutput] = useState("");
+            const [descGenerating, setDescGenerating] = useState(false);
+
+            // Load Sample
+            const handleLoadSample = (sampleName) => {
+                setSelectedSample(sampleName);
+                setProfileText(JSON.stringify(SAMPLES[sampleName], null, 2));
+                setEnrichStatus("");
+            };
+
+            // Enrich Data
+            const handleEnrich = async () => {
+                try {
+                    setEnriching(true);
+                    setEnrichStatus("Enriching data...");
+
+                    const profile = JSON.parse(profileText);
+                    const enrichedProfile = await enrichWithBackend(profile);
+
+                    setProfileText(JSON.stringify(enrichedProfile, null, 2));
+                    setEnrichStatus("✓ Data enriched successfully!");
+                } catch (error) {
+                    setEnrichStatus(`✗ Enrichment failed: ${error.message}`);
+                } finally {
+                    setEnriching(false);
+                }
+            };
+
+            // Generate SWOT
+            const handleGenerateSWOT = async () => {
+                try {
+                    setSwotGenerating(true);
+                    setSwotOutput("Generating SWOT analysis...");
+
+                    const profile = JSON.parse(profileText);
+                    profile.hideBusinessName = hideBusinessName; // Add hide flag to profile
+                    let result;
+
+                    if (swotProvider === "openai") {
+                        result = await generateSWOTWithOpenAI(profile);
+                    } else {
+                        result = await generateSWOTWithPerplexity(profile);
+                    }
+
+                    setSwotOutput(result);
+                } catch (error) {
+                    setSwotOutput(`Error: ${error.message}`);
+                } finally {
+                    setSwotGenerating(false);
+                }
+            };
+
+            // Generate Description
+            const handleGenerateDescription = async () => {
+                try {
+                    setDescGenerating(true);
+                    setDescOutput("Generating business description...");
+
+                    const profile = JSON.parse(profileText);
+                    profile.hideBusinessName = hideBusinessName; // Add hide flag to profile
+                    let result;
+
+                    if (descProvider === "openai") {
+                        result = await generateDescriptionWithOpenAI(profile);
+                    } else {
+                        result = await generateDescriptionWithPerplexity(profile);
+                    }
+
+                    setDescOutput(result);
+                } catch (error) {
+                    setDescOutput(`Error: ${error.message}`);
+                } finally {
+                    setDescGenerating(false);
+                }
+            };
+
+            // Copy to Clipboard
+            const handleCopy = (text) => {
+                navigator.clipboard.writeText(text);
+                alert("Copied to clipboard!");
+            };
+
+            // Download
+            const handleDownload = (content, filename) => {
+                const blob = new Blob([content], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-50 p-6">
+                    <div className="max-w-7xl mx-auto">
+                        <h1 className="text-3xl font-bold mb-6 text-gray-800">SWOT & AI Description Generator</h1>
+
+                        {/* Business Profile Section */}
+                        <div className="bg-white rounded-lg shadow p-6 mb-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-xl font-semibold">Business Profile (JSON)</h2>
+                                <div className="flex gap-2">
+                                    <select
+                                        value={selectedSample}
+                                        onChange={(e) => handleLoadSample(e.target.value)}
+                                        className="px-3 py-2 border rounded"
+                                    >
+                                        {Object.keys(SAMPLES).map(name => (
+                                            <option key={name} value={name}>{name}</option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        onClick={handleEnrich}
+                                        disabled={enriching}
+                                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
+                                    >
+                                        {enriching ? "Enriching..." : "🔍 Enrich Data"}
+                                    </button>
+                                </div>
+                            </div>
+                            {enrichStatus && (
+                                <div className="mb-3 text-sm text-blue-600">{enrichStatus}</div>
+                            )}
+                            <textarea
+                                value={profileText}
+                                onChange={(e) => setProfileText(e.target.value)}
+                                className="w-full h-64 p-3 border rounded font-mono text-sm"
+                                style={{ resize: 'vertical' }}
+                            />
+                            <div className="mt-3">
+                                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={hideBusinessName}
+                                        onChange={(e) => setHideBusinessName(e.target.checked)}
+                                        className="w-4 h-4"
+                                    />
+                                    <span>Hide business name in outputs (for confidential sales)</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        {/* Side-by-Side: SWOT and Description */}
+                        <div className="grid grid-cols-2 gap-6">
+
+                            {/* SWOT Generation */}
+                            <div className="bg-white rounded-lg shadow p-6">
+                                <h2 className="text-xl font-semibold mb-4">SWOT Generation</h2>
+
+                                <div className="space-y-3 mb-4">
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">LLM Provider</label>
+                                        <select
+                                            value={swotProvider}
+                                            onChange={(e) => setSwotProvider(e.target.value)}
+                                            className="w-full px-3 py-2 border rounded"
+                                        >
+                                            <option value="openai">OpenAI</option>
+                                            <option value="perplexity">Perplexity</option>
+                                        </select>
+                                    </div>
+                                    <button
+                                        onClick={handleGenerateSWOT}
+                                        disabled={swotGenerating}
+                                        className="w-full px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-400"
+                                    >
+                                        {swotGenerating ? "Generating..." : "Generate SWOT"}
+                                    </button>
+                                </div>
+
+                                <div className="mb-2 flex gap-2">
+                                    <button
+                                        onClick={() => handleCopy(swotOutput)}
+                                        disabled={!swotOutput}
+                                        className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:bg-gray-100 text-sm"
+                                    >
+                                        📋 Copy
+                                    </button>
+                                    <button
+                                        onClick={() => handleDownload(swotOutput, 'swot_analysis.md')}
+                                        disabled={!swotOutput}
+                                        className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:bg-gray-100 text-sm"
+                                    >
+                                        💾 Download
+                                    </button>
+                                </div>
+
+                                <textarea
+                                    value={swotOutput}
+                                    readOnly
+                                    placeholder="Generated SWOT will appear here..."
+                                    className="w-full h-96 p-3 border rounded font-mono text-sm bg-gray-50"
+                                    style={{ resize: 'vertical' }}
+                                />
+                            </div>
+
+                            {/* AI Description Writer */}
+                            <div className="bg-white rounded-lg shadow p-6">
+                                <h2 className="text-xl font-semibold mb-4">AI Description Writer</h2>
+
+                                <div className="space-y-3 mb-4">
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">LLM Provider</label>
+                                        <select
+                                            value={descProvider}
+                                            onChange={(e) => setDescProvider(e.target.value)}
+                                            className="w-full px-3 py-2 border rounded"
+                                        >
+                                            <option value="openai">OpenAI</option>
+                                            <option value="perplexity">Perplexity</option>
+                                        </select>
+                                    </div>
+                                    <button
+                                        onClick={handleGenerateDescription}
+                                        disabled={descGenerating}
+                                        className="w-full px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-400"
+                                    >
+                                        {descGenerating ? "Generating..." : "Generate Description"}
+                                    </button>
+                                </div>
+
+                                <div className="mb-2 flex gap-2">
+                                    <button
+                                        onClick={() => handleCopy(descOutput)}
+                                        disabled={!descOutput}
+                                        className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:bg-gray-100 text-sm"
+                                    >
+                                        📋 Copy
+                                    </button>
+                                    <button
+                                        onClick={() => handleDownload(descOutput, 'business_description.txt')}
+                                        disabled={!descOutput}
+                                        className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:bg-gray-100 text-sm"
+                                    >
+                                        💾 Download
+                                    </button>
+                                </div>
+
+                                <textarea
+                                    value={descOutput}
+                                    onChange={(e) => setDescOutput(e.target.value)}
+                                    placeholder="Generated description will appear here..."
+                                    className="w-full h-96 p-3 border rounded font-mono text-sm"
+                                    style={{ resize: 'vertical' }}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Render
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>
