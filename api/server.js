@@ -426,6 +426,80 @@ app.post('/api/enrich', async (req, res) => {
             }
         }
 
+        // ============================================================================
+        // PHASE 2: VALIDATION
+        // ============================================================================
+        enrichedData.validationResults = {
+            foundationYear: null,
+            businessName: null,
+            financials: null,
+            location: null
+        };
+
+        // Get additional data from request body for validation
+        const { yearFounded, websiteUrl, financials, areaOrDistrict } = req.body;
+
+        if (yearFounded && websiteUrl) {
+            enrichedData.validationResults.foundationYear = await validateFoundationYear(
+                businessName,
+                yearFounded,
+                websiteUrl,
+                enrichedData.googlePlaces
+            );
+        }
+
+        if (enrichedData.googlePlaces) {
+            enrichedData.validationResults.businessName = await validateBusinessName(
+                businessName,
+                enrichedData.googlePlaces
+            );
+
+            if (areaOrDistrict) {
+                enrichedData.validationResults.location = await validateLocation(
+                    areaOrDistrict,
+                    enrichedData.googlePlaces
+                );
+            }
+        }
+
+        if (financials && financials.length > 0 && industry) {
+            enrichedData.validationResults.financials = await validateFinancials(
+                financials,
+                industry
+            );
+        }
+
+        // ============================================================================
+        // PHASE 3: EXTRACTION FEATURES
+        // ============================================================================
+        enrichedData.extractedData = {
+            clientNames: null,
+            portfolioLinks: null,
+            industryPlatforms: null,
+            awards: null
+        };
+
+        enrichedData.extractedData.clientNames = await extractClientNames(
+            businessName,
+            industry
+        );
+
+        enrichedData.extractedData.portfolioLinks = await discoverPortfolioLinks(
+            businessName,
+            industry,
+            websiteUrl
+        );
+
+        enrichedData.extractedData.industryPlatforms = await extractIndustryPlatforms(
+            industry,
+            location
+        );
+
+        enrichedData.extractedData.awards = await extractAwardsRecognition(
+            businessName,
+            location
+        );
+
         res.json(enrichedData);
 
     } catch (error) {
@@ -691,6 +765,637 @@ Generate the description now:`;
 }
 
 /**
+ * ============================================================================
+ * PHASE 2: DATA VALIDATION FUNCTIONS
+ * ============================================================================
+ */
+
+/**
+ * Validate foundation year by cross-checking website, Google Places, and SERP
+ */
+async function validateFoundationYear(businessName, sellerClaimedYear, websiteUrl, googlePlacesData) {
+    const validation = {
+        sellerClaim: sellerClaimedYear,
+        websiteData: null,
+        googlePlacesData: null,
+        serpData: null,
+        discrepancy: false,
+        mostLikelyYear: sellerClaimedYear,
+        confidence: 'low',
+        recommendation: null
+    };
+
+    // 1. Check website if URL provided
+    if (websiteUrl) {
+        try {
+            const response = await axios.get(websiteUrl, { 
+                timeout: 5000,
+                headers: { 'User-Agent': 'Mozilla/5.0' }
+            });
+            const html = response.data;
+            
+            // Pattern 1: Copyright range "© 2011-2024"
+            const copyrightMatch = html.match(/©\s*(\d{4})\s*[-–]\s*\d{4}/);
+            if (copyrightMatch) {
+                validation.websiteData = parseInt(copyrightMatch[1]);
+            }
+            
+            // Pattern 2: "Established", "Founded", "Since" + year
+            if (!validation.websiteData) {
+                const establishedMatch = html.match(/(?:established|founded|since)\s+(?:in\s+)?(\d{4})/i);
+                if (establishedMatch) {
+                    validation.websiteData = parseInt(establishedMatch[1]);
+                }
+            }
+        } catch (err) {
+            console.log('Website validation failed:', err.message);
+        }
+    }
+
+    // 2. Check Google Places opening date
+    if (googlePlacesData?.opening_date) {
+        const year = new Date(googlePlacesData.opening_date).getFullYear();
+        validation.googlePlacesData = year;
+    }
+
+    // 3. Check SERP results
+    if (SERP_API_KEY) {
+        try {
+            const query = `"${businessName}" founded established since`;
+            const response = await axios.get('https://serpapi.com/search', {
+                params: {
+                    q: query,
+                    api_key: SERP_API_KEY,
+                    engine: 'google',
+                    num: 5
+                },
+                timeout: 5000
+            });
+
+            const results = response.data.organic_results || [];
+            for (const result of results) {
+                const text = (result.snippet || '') + ' ' + (result.title || '');
+                const yearMatch = text.match(/(?:founded|established|since)\s+(?:in\s+)?(\d{4})/i);
+                if (yearMatch) {
+                    validation.serpData = parseInt(yearMatch[1]);
+                    break;
+                }
+            }
+        } catch (err) {
+            console.log('SERP foundation year validation failed:', err.message);
+        }
+    }
+
+    // 4. Determine consensus and flag discrepancies
+    const sources = [
+        validation.websiteData,
+        validation.googlePlacesData,
+        validation.serpData
+    ].filter(y => y && y > 1900 && y <= new Date().getFullYear());
+
+    if (sources.length > 0) {
+        // Find most common year
+        const yearCounts = {};
+        sources.forEach(y => yearCounts[y] = (yearCounts[y] || 0) + 1);
+        
+        const mostCommonYear = parseInt(
+            Object.entries(yearCounts).sort((a, b) => b[1] - a[1])[0][0]
+        );
+        
+        validation.mostLikelyYear = mostCommonYear;
+        
+        // Flag if seller claim differs by 2+ years
+        if (Math.abs(validation.sellerClaim - mostCommonYear) >= 2) {
+            validation.discrepancy = true;
+            validation.confidence = 'high';
+            validation.recommendation = `Use ${mostCommonYear} as founding year; seller may have confused registration date (${sellerClaimedYear}) with actual founding`;
+        } else {
+            validation.confidence = 'high';
+        }
+    } else if (validation.sellerClaim) {
+        validation.confidence = 'low';
+        validation.recommendation = 'No public data found to verify founding year; rely on seller documentation';
+    }
+
+    return validation;
+}
+
+/**
+ * Validate business name accuracy
+ */
+async function validateBusinessName(sellerName, googlePlacesData) {
+    const validation = {
+        sellerClaim: sellerName,
+        googlePlacesName: null,
+        discrepancy: false,
+        suggestion: null
+    };
+
+    if (googlePlacesData?.name) {
+        validation.googlePlacesName = googlePlacesData.name;
+        
+        // Normalize and compare (ignore case, punctuation, "Pte Ltd", etc.)
+        const normalize = (s) => s
+            .toLowerCase()
+            .replace(/pte\.?\s*ltd\.?/gi, '')
+            .replace(/private\s*limited/gi, '')
+            .replace(/[^a-z0-9]/g, '');
+        
+        if (normalize(sellerName) !== normalize(googlePlacesData.name)) {
+            validation.discrepancy = true;
+            validation.suggestion = googlePlacesData.name;
+        }
+    }
+
+    return validation;
+}
+
+/**
+ * Validate financial reasonability
+ */
+async function validateFinancials(financials, industryType) {
+    const validation = {
+        redFlags: [],
+        warnings: [],
+        reasonabilityCheck: 'pass'
+    };
+
+    if (!financials || financials.length === 0) {
+        return validation;
+    }
+
+    const latest = financials[financials.length - 1];
+    const revenue = latest.revenue;
+    const netProfit = latest.netProfit;
+
+    // 1. Basic sanity checks
+    if (netProfit > revenue) {
+        validation.redFlags.push({
+            type: 'profit_exceeds_revenue',
+            severity: 'critical',
+            note: `Net profit ($${netProfit.toLocaleString()}) exceeds revenue ($${revenue.toLocaleString()}), which is mathematically impossible`
+        });
+    }
+
+    if (revenue < 0 || netProfit < 0) {
+        validation.redFlags.push({
+            type: 'negative_values',
+            severity: 'critical',
+            note: 'Negative revenue or profit values detected; verify data entry'
+        });
+    }
+
+    // 2. Profit margin reasonability
+    const margin = (netProfit / revenue) * 100;
+    const industryBenchmarks = {
+        'Food & Beverage': { low: 5, typical: 15, high: 25 },
+        'Retail': { low: 3, typical: 10, high: 20 },
+        'E-commerce': { low: 5, typical: 15, high: 30 },
+        'Professional Services': { low: 15, typical: 30, high: 45 },
+        'Technology': { low: 10, typical: 25, high: 40 },
+        'Healthcare': { low: 10, typical: 20, high: 35 },
+        'Education': { low: 8, typical: 18, high: 30 },
+        'Manufacturing': { low: 5, typical: 12, high: 22 },
+        'Construction': { low: 3, typical: 8, high: 15 }
+    };
+
+    const benchmark = industryBenchmarks[industryType] || { low: 10, typical: 25, high: 40 };
+
+    if (margin > benchmark.high * 1.5) {
+        validation.redFlags.push({
+            type: 'unusually_high_margin',
+            value: margin.toFixed(1),
+            expected: benchmark.typical,
+            severity: 'high',
+            note: `Net margin of ${margin.toFixed(1)}% significantly exceeds industry typical of ${benchmark.typical}%; verify owner salary exclusion and ensure all operating costs are captured`
+        });
+    } else if (margin > benchmark.high) {
+        validation.warnings.push({
+            type: 'above_average_margin',
+            value: margin.toFixed(1),
+            expected: benchmark.typical,
+            note: `Net margin of ${margin.toFixed(1)}% is above typical ${benchmark.typical}% for this industry; strong if sustainable but verify cost completeness`
+        });
+    }
+
+    // 3. YoY consistency check
+    if (financials.length >= 2) {
+        const previous = financials[financials.length - 2];
+        const revenueChange = ((latest.revenue - previous.revenue) / previous.revenue) * 100;
+        const profitChange = ((latest.netProfit - previous.netProfit) / previous.netProfit) * 100;
+
+        if (Math.abs(revenueChange - profitChange) > 60) {
+            validation.warnings.push({
+                type: 'inconsistent_growth_pattern',
+                revenueChange: revenueChange.toFixed(1),
+                profitChange: profitChange.toFixed(1),
+                note: `Revenue changed ${revenueChange > 0 ? '+' : ''}${revenueChange.toFixed(1)}% while profit changed ${profitChange > 0 ? '+' : ''}${profitChange.toFixed(1)}%; large variance may indicate cost structure changes or one-time items`
+            });
+        }
+    }
+
+    if (validation.redFlags.length > 0) {
+        validation.reasonabilityCheck = 'critical';
+    } else if (validation.warnings.length > 0) {
+        validation.reasonabilityCheck = 'review';
+    }
+
+    return validation;
+}
+
+/**
+ * Validate location
+ */
+async function validateLocation(sellerLocation, googlePlacesData) {
+    const validation = {
+        sellerClaim: sellerLocation,
+        googlePlacesAddress: null,
+        discrepancy: false
+    };
+
+    if (googlePlacesData?.formatted_address) {
+        validation.googlePlacesAddress = googlePlacesData.formatted_address;
+        
+        if (!googlePlacesData.formatted_address.toLowerCase()
+            .includes(sellerLocation.toLowerCase())) {
+            validation.discrepancy = true;
+        }
+    }
+
+    return validation;
+}
+
+/**
+ * ============================================================================
+ * PHASE 3: EXTRACTION FUNCTIONS
+ * ============================================================================
+ */
+
+/**
+ * Extract client names from SERP results
+ */
+async function extractClientNames(businessName, industry) {
+    const extraction = {
+        clientNames: [],
+        sources: [],
+        confidence: 'low'
+    };
+
+    if (!SERP_API_KEY) return extraction;
+
+    const queries = [
+        `"${businessName}" clients`,
+        `"${businessName}" portfolio`,
+        `"${businessName}" "worked with"`,
+        `"${businessName}" case studies`
+    ];
+
+    for (const query of queries) {
+        try {
+            const response = await axios.get('https://serpapi.com/search', {
+                params: {
+                    q: query,
+                    api_key: SERP_API_KEY,
+                    engine: 'google',
+                    num: 10
+                },
+                timeout: 5000
+            });
+
+            const results = response.data.organic_results || [];
+            
+            for (const result of results) {
+                const text = (result.snippet || '') + ' ' + (result.title || '');
+                
+                // Pattern 1: "clients include X, Y, Z"
+                const pattern1 = text.match(/clients?\s+(?:include|such as|like)[\s:]+([^.!?]+)/i);
+                if (pattern1) {
+                    const names = pattern1[1]
+                        .split(/,|and|\||\//)
+                        .map(n => n.trim())
+                        .filter(n => 
+                            n.length > 2 && 
+                            n.length < 50 && 
+                            !n.match(/^https?:/) &&
+                            !n.match(/^\d+$/)
+                        );
+                    
+                    extraction.clientNames.push(...names);
+                    
+                    if (names.length > 0) {
+                        extraction.sources.push({
+                            url: result.link,
+                            snippet: result.snippet
+                        });
+                    }
+                }
+                
+                // Pattern 2: "Portfolio: X, Y, Z"
+                const pattern2 = text.match(/(?:portfolio|work|projects)[\s:]+([^.!?]+)/i);
+                if (pattern2) {
+                    const names = pattern2[1]
+                        .split(/,|and|\||\//)
+                        .map(n => n.trim())
+                        .filter(n => n.length > 2 && n.length < 50);
+                    
+                    extraction.clientNames.push(...names);
+                }
+            }
+        } catch (err) {
+            console.log(`Client extraction failed for query: ${query}`, err.message);
+        }
+    }
+
+    // Deduplicate and clean
+    const genericWords = [
+        'clients', 'portfolio', 'projects', 'services', 'work', 'more',
+        'including', 'various', 'multiple', 'many', 'several', 'other'
+    ];
+    
+    extraction.clientNames = [...new Set(extraction.clientNames)]
+        .filter(name => !genericWords.includes(name.toLowerCase()))
+        .filter(name => {
+            const alphaRatio = (name.match(/[a-zA-Z]/g) || []).length / name.length;
+            return alphaRatio > 0.5;
+        })
+        .slice(0, 15);
+
+    // Set confidence
+    if (extraction.clientNames.length >= 5) {
+        extraction.confidence = 'high';
+    } else if (extraction.clientNames.length >= 3) {
+        extraction.confidence = 'medium';
+    }
+
+    return extraction;
+}
+
+/**
+ * Discover portfolio links (Behance, Dribbble, GitHub, website)
+ */
+async function discoverPortfolioLinks(businessName, industry, websiteUrl) {
+    const discovery = {
+        links: [],
+        platforms: [],
+        projectCount: 0
+    };
+
+    if (!SERP_API_KEY) return discovery;
+
+    const platformMapping = {
+        'Technology': ['github.com', 'gitlab.com'],
+        'Professional Services': ['behance.net', 'dribbble.com'],
+        'Creative': ['behance.net', 'dribbble.com', 'vimeo.com']
+    };
+
+    const targetPlatforms = platformMapping[industry] || ['behance.net', 'dribbble.com'];
+
+    for (const platform of targetPlatforms) {
+        try {
+            const query = `site:${platform} "${businessName}"`;
+            
+            const response = await axios.get('https://serpapi.com/search', {
+                params: {
+                    q: query,
+                    api_key: SERP_API_KEY,
+                    engine: 'google',
+                    num: 5
+                },
+                timeout: 5000
+            });
+
+            const results = response.data.organic_results || [];
+            
+            for (const result of results) {
+                if (result.link && result.link.includes(platform)) {
+                    discovery.links.push({
+                        platform: platform.replace('.net', '').replace('.com', ''),
+                        url: result.link,
+                        title: result.title,
+                        snippet: result.snippet
+                    });
+                    
+                    if (!discovery.platforms.includes(platform)) {
+                        discovery.platforms.push(platform);
+                    }
+                    
+                    const countMatch = result.snippet?.match(/(\d+)\s+(?:projects|works)/i);
+                    if (countMatch) {
+                        discovery.projectCount += parseInt(countMatch[1]);
+                    }
+                }
+            }
+        } catch (err) {
+            console.log(`Portfolio search failed for ${platform}:`, err.message);
+        }
+    }
+
+    // Search own website
+    if (websiteUrl) {
+        try {
+            const hostname = new URL(websiteUrl).hostname;
+            const query = `site:${hostname} portfolio OR work OR projects`;
+            
+            const response = await axios.get('https://serpapi.com/search', {
+                params: {
+                    q: query,
+                    api_key: SERP_API_KEY,
+                    engine: 'google',
+                    num: 3
+                },
+                timeout: 5000
+            });
+
+            const results = response.data.organic_results || [];
+            for (const result of results) {
+                discovery.links.push({
+                    platform: 'website',
+                    url: result.link,
+                    title: result.title,
+                    snippet: result.snippet
+                });
+            }
+        } catch (err) {
+            console.log('Website portfolio search failed:', err.message);
+        }
+    }
+
+    return discovery;
+}
+
+/**
+ * Extract industry platforms (for threats/opportunities)
+ */
+async function extractIndustryPlatforms(industry, location = 'Singapore') {
+    const extraction = {
+        platforms: [],
+        threatRelevant: [],
+        opportunityRelevant: []
+    };
+
+    if (!SERP_API_KEY) return extraction;
+
+    const PLATFORM_PATTERNS = {
+        'Food & Beverage': {
+            delivery: /deliveroo|foodpanda|grab[\s-]?food|uber[\s-]?eats|shopee[\s-]?food/gi,
+            pos: /square|toast|lightspeed|shopify[\s-]?pos/gi
+        },
+        'E-commerce': {
+            platform: /shopify|woocommerce|magento|lazada|shopee|carousell|qoo10/gi,
+            payment: /stripe|paypal|square|adyen/gi
+        },
+        'Technology': {
+            cloud: /aws|azure|gcp|google[\s-]?cloud|vercel|netlify/gi,
+            nocode: /webflow|wix|squarespace|bubble/gi
+        },
+        'Professional Services': {
+            crm: /salesforce|hubspot|zoho|pipedrive/gi
+        }
+    };
+
+    const patterns = PLATFORM_PATTERNS[industry];
+    if (!patterns) return extraction;
+
+    try {
+        const query = `${industry} platforms tools trends ${location} 2024 2025`;
+        const response = await axios.get('https://serpapi.com/search', {
+            params: {
+                q: query,
+                api_key: SERP_API_KEY,
+                engine: 'google',
+                num: 12
+            },
+            timeout: 5000
+        });
+
+        const results = response.data.organic_results || [];
+        const platformCounts = {};
+        
+        for (const result of results) {
+            const text = (result.snippet || '') + ' ' + (result.title || '');
+            
+            for (const [category, pattern] of Object.entries(patterns)) {
+                const matches = text.match(pattern);
+                if (matches) {
+                    matches.forEach(match => {
+                        const normalized = match.toLowerCase().trim();
+                        platformCounts[normalized] = (platformCounts[normalized] || 0) + 1;
+                    });
+                }
+            }
+        }
+
+        extraction.platforms = Object.entries(platformCounts)
+            .sort((a, b) => b[1] - a[1])
+            .map(([platform]) => platform)
+            .slice(0, 8);
+
+        const threatCategories = ['delivery', 'platform', 'nocode'];
+        const opportunityCategories = ['pos', 'payment', 'cloud', 'crm'];
+
+        extraction.platforms.forEach(platform => {
+            const patternName = Object.keys(patterns).find(key => 
+                patterns[key].test(platform)
+            );
+            
+            if (patternName && threatCategories.includes(patternName)) {
+                extraction.threatRelevant.push(platform);
+            }
+            if (patternName && opportunityCategories.includes(patternName)) {
+                extraction.opportunityRelevant.push(platform);
+            }
+        });
+
+    } catch (err) {
+        console.log('Platform extraction failed:', err.message);
+    }
+
+    return extraction;
+}
+
+/**
+ * Extract awards and recognition
+ */
+async function extractAwardsRecognition(businessName, location) {
+    const extraction = {
+        awards: [],
+        recentCount: 0
+    };
+
+    if (!SERP_API_KEY) return extraction;
+
+    const queries = [
+        `"${businessName}" award`,
+        `"${businessName}" winner`,
+        `"${businessName}" recognition`
+    ];
+
+    for (const query of queries) {
+        try {
+            const response = await axios.get('https://serpapi.com/search', {
+                params: {
+                    q: query,
+                    api_key: SERP_API_KEY,
+                    engine: 'google',
+                    num: 5
+                },
+                timeout: 5000
+            });
+
+            const results = response.data.organic_results || [];
+            
+            for (const result of results) {
+                const text = (result.snippet || '') + ' ' + (result.title || '');
+                
+                const awardKeywords = ['award', 'winner', 'recognition', 'honorable mention', 'excellence'];
+                const hasAward = awardKeywords.some(kw => text.toLowerCase().includes(kw));
+                
+                if (!hasAward || !text.includes(businessName)) continue;
+                
+                const patterns = [
+                    /([A-Z][^.]+(?:Award|Prize|Recognition))/,
+                    /(Singapore\s+500\s+SME)/i,
+                    /(Awwwards?\s+[^.]+)/i,
+                    /([^.]+\s+of\s+the\s+Year)/i
+                ];
+                
+                for (const pattern of patterns) {
+                    const match = text.match(pattern);
+                    if (match) {
+                        const yearMatch = text.match(/\b(20\d{2})\b/);
+                        const year = yearMatch ? parseInt(yearMatch[1]) : null;
+                        
+                        extraction.awards.push({
+                            name: match[1].trim(),
+                            year: year,
+                            source: result.link
+                        });
+                        
+                        if (year && (new Date().getFullYear() - year) <= 3) {
+                            extraction.recentCount++;
+                        }
+                        break;
+                    }
+                }
+            }
+        } catch (err) {
+            console.log(`Award search failed for: ${query}`, err.message);
+        }
+    }
+
+    // Deduplicate
+    const seen = new Set();
+    extraction.awards = extraction.awards.filter(award => {
+        const key = award.name.toLowerCase().replace(/\s+/g, '');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+
+    return extraction;
+}
+
+/**
  * Health check endpoint
  */
 app.get('/api/health', (req, res) => {
@@ -700,7 +1405,6 @@ app.get('/api/health', (req, res) => {
         hasSerpApiKey: !!SERP_API_KEY
     });
 });
-
 
 // Export for Vercel serverless (don't start server in serverless environment)
 module.exports = app;

@@ -61,6 +61,76 @@ If the business profile includes serpData.industryTrends:
 - THREATS: Note industry challenges mentioned in trend articles
 - Use relatedSearches to identify emerging customer interests
 
+USING VALIDATION RESULTS:
+If the business profile includes validationResults:
+
+Foundation Year Discrepancies:
+- If foundationYear.discrepancy is true, add to WEAKNESSES:
+  "Seller claims founded [sellerClaim], but [source] shows [mostLikelyYear]; [difference]-year discrepancy warrants clarification during due diligence"
+- Use mostLikelyYear in all other SWOT sections, not sellerClaim
+- Add to DUE DILIGENCE: "Reconcile founding year discrepancy between seller claim and public records"
+
+Financial Red Flags:
+- If financials.redFlags exist with severity 'high' or 'critical', add to WEAKNESSES:
+  Example: "Net margin of [value]% significantly exceeds industry typical of [expected]%; verify owner salary exclusion and ensure all operating costs are captured"
+- If financials.warnings exist, mention in WEAKNESSES but less prominently
+- Add to DUE DILIGENCE: Specific verification steps for flagged financial items
+
+Business Name Discrepancies:
+- If businessName.discrepancy is true, note in DUE DILIGENCE:
+  "Verify if business operates under '[sellerClaim]' or '[googlePlacesName]' and ensure all contracts transfer correctly"
+
+USING EXTRACTED CLIENT NAMES:
+If extractedData.clientNames has 3+ names with confidence 'medium' or 'high':
+- Add to STRENGTHS (early in list):
+  "Portfolio includes [name1], [name2], [name3] demonstrating credibility with established brands across [industry] sector"
+- Use actual names from clientNames array - DO NOT fabricate
+- Only mention if confidence is NOT 'low'
+- Format: Source [URL] at end if sourceUrl available
+
+USING PORTFOLIO LINKS:
+If extractedData.portfolioLinks has links:
+- If platform is 'behance' or 'dribbble' and projectCount > 10:
+  STRENGTHS: "Active portfolio on [platform] with [count] projects demonstrates work quality and transparency. Source [URL]"
+- If platform is 'github' and business is tech:
+  STRENGTHS: "Public GitHub presence provides code transparency. Source [URL]"
+- If NO portfolio found but industry expects one (Technology, Professional Services):
+  OPPORTUNITIES: "Creating public portfolio on Behance or GitHub could improve lead conversion and trust-building"
+
+USING INDUSTRY PLATFORMS:
+If extractedData.industryPlatforms exists:
+- Use threatRelevant platforms in THREATS with seller-centric focus:
+  Example for web agency: "Small agency scale (8 staff, $200K revenue) limits R&D investment in AI-assisted development tools while competitors deploy Webflow and low-code platforms to maintain margins on commoditized work"
+  Example for F&B: "GrabFood and Foodpanda commission rates of 25-30% erode already-thin margins; single-location model lacks negotiating power with platforms"
+- Use opportunityRelevant platforms in OPPORTUNITIES:
+  Example: "Integrate with [platform] to expand addressable market and improve operational efficiency"
+- MUST be industry-appropriate - don't mention Shopify for F&B or delivery platforms for tech
+
+USING AWARDS:
+If extractedData.awards has recentCount > 0:
+- Add to STRENGTHS:
+  "[Award name] ([year]) provides third-party credibility for enterprise sales and differentiates from commodity competitors. Source [awardSourceUrl]"
+- Only mention awards from last 3 years
+- Include actual award name and year from data
+
+SOURCE ATTRIBUTION REQUIREMENTS (CRITICAL):
+Every factual claim must have a source attribution:
+
+For URLs (website, portfolio, articles):
+- Format: Source [https://example.com] at END of point
+
+For non-URL data (Google Places, calculations, benchmarks):
+- Weave naturally into sentence 3 (implication), no brackets needed
+- Example: "Google rating of 4.8/5 provides strong social proof, though small team limits capacity for larger projects requiring simultaneous work"
+- Example: "Revenue of $200K limits marketing budget based on typical 5-10% allocation in this industry"
+
+MANDATORY source attribution for:
+- Portfolio/client names: Source [portfolioUrl]
+- Competitor capabilities: Source [competitorWebsite] or reference naturally
+- Financial figures: seller-reported, no citation needed
+- Industry benchmarks: reference naturally in implication sentence
+- Awards: Source [awardUrl]
+
 MARKET BENCHMARKING (CRITICAL):
 For each business, assess and compare:
 - How many similar businesses operate in Singapore in this industry (competitive density)
@@ -412,22 +482,71 @@ Guidelines:
 ---
 
 **4. Threats**
+SELLER-CENTRIC COMPETITIVE ANALYSIS (CRITICAL):
+- 70% focus on SELLER'S business (capabilities, limitations, scale, positioning)
+- 30% competitive context (max 2 competitors with specific differentiators)
+- Must reference seller's actual portfolio/clients/capabilities from extracted data
+- Must explain mechanism (WHY it's a threat, HOW it impacts business)
+- Must include timeline (6-12 months, 12-24 months, etc.)
+- Total length per point: 60-100 words (approximately same as Opportunities example)
+
 Each point must follow this format with bold title:
-**Title (3-6 words):** First sentence describing the threat specific to this business. Second sentence explaining timeline or trigger. Third sentence with quantified or directional consequence.
+**Title (3-6 words):** Sentence 1 (business limitation + competitive context). Sentence 2 (business capability/strength). Sentence 3 (implication + timeline). Source [URL] if applicable.
+
+Sentence Structure:
+1. Business limitation + competitive context (30-40 words)
+   Example: "8-person team limits ability to accept projects requiring simultaneous work on multiple sites, constraining bid competitiveness for RFPs above $100K compared to agencies like Heroes of Digital (100+ staff)"
+
+2. Business capability/strength with evidence (20-35 words)
+   Example: "The company's portfolio demonstrates capability with NUS and Sysmex as anchor accounts, providing reference credibility for similar-tier prospects"
+
+3. Implication + timeline (15-30 words)
+   Example: "Growth into larger enterprise deals requires team expansion or strategic partnerships over next 12-24 months"
 
 Example format:
-**Client Concentration Risk in Small Revenue Base:** At $200K annual revenue with relationship-led model, loss of 1-2 institutional clients could impact 20-30% of billings within single contract period. Risk elevated by founder-led sales and account management. New owner must secure transition meetings and relationship mapping within first 60 days.
+**Limited Team Scale Constrains Enterprise Project Bidding:** 8-person team limits ability to accept projects requiring simultaneous work on multiple client sites, constraining bid competitiveness for institutional RFPs above $100K compared to agencies like Heroes of Digital (100+ staff). The company's portfolio demonstrates capability with NUS and Sysmex as anchor institutional accounts, providing reference credibility for similar-tier prospects. Growth into larger enterprise deals requires either team expansion or strategic partnerships for overflow capacity over next 12-24 months. Source [https://orfeostory.com/portfolio]
 
-**Platform Commoditization Pressure on Custom Development:** Shopify, Wix, Webflow continue reducing demand for basic custom websites, compressing margins on entry-level projects. Over 24 months, revenue could skew toward fewer, larger projects unless business differentiates via UX strategy and security. Small agency scale limits ability to compete on complex enterprise projects.
+**Platform Commoditization Pressure on Custom Development:** Shopify, Wix, Webflow continue reducing demand for basic custom websites, compressing margins on entry-level projects over next 24 months. Business's current service mix includes custom web applications and managed IT which remain defensible, but must shift further up-market into complex integrations. Small agency scale (8 staff, $200K revenue) limits R&D investment in AI-assisted tools that larger competitors deploy.
 
-BUSINESS-SPECIFIC FOCUS:
-- Tie threats to THIS business's structure (concentration, size, dependencies)
-- Include timeline/trigger and quantified impact where possible
-- Avoid generic industry threats - focus on vulnerabilities specific to this acquisition
+BUSINESS-SPECIFIC FOCUS (CRITICAL):
+- Start with seller's limitation (team size, single location, revenue scale, owner dependency)
+- Add competitive context only if relevant (1-2 competitors max)
+- Reference seller's actual portfolio/clients from extractedData
+- Explain threat mechanism specific to THIS business
+- Quantify impact where possible (20-30% revenue impact, etc.)
+- Industry-specific adaptation:
+  * F&B/Retail: Geographic concentration, chain competition, delivery platforms
+  * Tech/Services: Team scale, client tier, platform commoditization
+  * E-commerce: Platform dependency, commission rates
+  * Healthcare: Telemedicine disruption, doctor dependency
+  * Education: Online platforms, accreditation requirements
+
+COMPETITOR MENTIONS (MAX 2):
+- Include ONE specific differentiator in parentheses
+- Format: "compared to [Competitor Name] ([specific capability])"
+- Examples: "Heroes of Digital (100+ staff)", "BreadTalk (50+ outlets)", "Zalora (platform subsidies)"
+- NEVER just list names without differentiators
+
+SOURCE ATTRIBUTION:
+- URLs: Add at end as "Source [https://example.com]"
+- Non-URLs: Weave naturally into sentence 3 (no brackets)
+- Industry benchmarks: Reference naturally ("typical for agencies this size", "standard in F&B sector")
+
+FORBIDDEN GENERIC THREATS:
+❌ "Intense competition in the market"
+❌ "Economic downturn could impact sales"  
+❌ "Technology disruption threatens traditional models"
+❌ "COVID-19 pandemic effects"
+
+REQUIRED SPECIFIC THREATS:
+✅ "8-person team limits simultaneous project capacity..."
+✅ "Single Tiong Bahru location creates geographic revenue concentration..."
+✅ "Revenue of $200K limits marketing budget and technology investment..."
+✅ "GrabFood commission rates of 25-30% erode margins on $450K revenue base..."
 
 Guidelines:
 - 3-6 numbered points total (adjust based on risk exposure - use fewer for stable businesses, more for high-risk)
-- MAXIMUM 3 sentences each
+- MAXIMUM 3 sentences per point (60-100 words total)
 - External risks tied to business structure: competition intensity tied to location/scale, platform dependence, market demand shifts, lease/landlord risk, owner transition challenges
 - Be realistic but measured - not alarmist
 - Connect threat to business's specific circumstances (revenue size, customer concentration, location, business model)
