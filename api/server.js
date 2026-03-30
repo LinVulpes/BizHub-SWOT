@@ -470,7 +470,7 @@ app.post('/api/generate-swot', async (req, res) => {
         // Call appropriate LLM provider
         if (provider === 'openai') {
             const response = await axios.post('https://api.openai.com/v1/chat/completions', {
-                model: 'gpt-4-turbo',
+                model: 'gpt-4o',
                 messages: [
                     {
                         role: 'system',
@@ -557,7 +557,7 @@ app.post('/api/generate-description', async (req, res) => {
         // Call appropriate LLM provider
         if (provider === 'openai') {
             const response = await axios.post('https://api.openai.com/v1/chat/completions', {
-                model: 'gpt-4-turbo',
+                model: 'gpt-4o',
                 messages: [
                     {
                         role: 'system',
@@ -700,6 +700,7 @@ app.get('/api/health', (req, res) => {
         hasSerpApiKey: !!SERP_API_KEY
     });
 });
+
 
 // Export for Vercel serverless (don't start server in serverless environment)
 module.exports = app;
